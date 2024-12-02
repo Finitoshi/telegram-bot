@@ -9,16 +9,17 @@ import httpx
 from pymongo import MongoClient
 import json
 from datetime import datetime, timedelta
+from tenacity import retry, stop_after_attempt, wait_fixed
 
-# Step 1: Configure logging for the app
+# Step 1: Configure logging for the app - because who doesn't love a good log?
 logging.basicConfig(
-    level=logging.DEBUG,  # Change level to DEBUG for more detailed logs
+    level=logging.DEBUG,  # Change level to DEBUG for more detailed logs - we're on a mission to debug everything
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("TelegramBotApp")
 
-# Step 2: Utility function to load environment variables
+# Step 2: Utility function to load environment variables - adulting is hard, let's log it!
 def get_env_variable(var_name: str, required: bool = True):
     value = os.getenv(var_name)
     if value:
@@ -30,22 +31,22 @@ def get_env_variable(var_name: str, required: bool = True):
         logger.warning(f"Environment variable '{var_name}' is not set (optional). Meh.")
     return value
 
-# Step 3: Load all necessary environment variables
+# Step 3: Load all necessary environment variables - 'cause we're not playing games here
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
 MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
 
-# Step 4: Initialize MongoDB client and cache collection
+# Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
 client = MongoClient(MONGO_URI)
 db = client['bot_db']
 cache_collection = db['cache']
 
-# Step 5: Initialize the Telegram bot application
+# Step 5: Initialize the Telegram bot application - let's get this party started
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Step 6: FastAPI application with detailed lifecycle management
+# Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Initializing Telegram bot application... 🔥")
@@ -64,13 +65,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Step 7: Health check route
+# Step 7: Health check route - just to make sure we're not dead yet
 @app.get("/")
 async def health_check():
     logger.info("Health check endpoint accessed. Still alive, yo.")
     return {"status": "ok"}
 
-# Step 8: Query Grok API and cache the response
+# Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait
 async def query_grok(message):
     cached_response = cache_collection.find_one({
         "message": message,
@@ -78,7 +80,7 @@ async def query_grok(message):
     })
 
     if cached_response:
-        logger.info("Returning cached response.")
+        logger.info("Returning cached response. We're all about that low-latency life.")
         return cached_response['response']
 
     headers = {
@@ -94,12 +96,11 @@ async def query_grok(message):
         "stream": False,
         "temperature": 0
     }
-    logger.info(f"Sending to Grok API: {payload}")
+    logger.info(f"Sending to Grok API: {payload}. Let's see if Grok's feeling chatty today.")
     
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:  # Give Grok a full minute to respond, patience is key
             response = await client.post(GROK_API_URL, headers=headers, json=payload)
-            # Log the status code and raw response for better error tracking
             logger.info(f"Received response from Grok API: Status code {response.status_code}")
             logger.debug(f"Response content: {response.text}")
             
@@ -108,7 +109,7 @@ async def query_grok(message):
             logger.info(f"Grok API response: {response_data}")
             
             # Extract response from Grok API
-            grok_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', "Grok did not respond properly.")
+            grok_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', "Grok did not respond properly. Guess AI has its off days too.")
             
             # Cache the response
             cache_data = {
@@ -120,21 +121,23 @@ async def query_grok(message):
             return grok_response
     except httpx.HTTPStatusError as e:
         # Log the specific HTTP error details
-        logger.error(f"Grok API HTTP error: Status code {e.response.status_code}, Response: {e.response.text}")
-        return "An error occurred while querying Grok."
+        logger.error(f"Grok API HTTP error: Status code {e.response.status_code}, Response: {e.response.text}. That's not very Grok of you!")
+        return "An error occurred while querying Grok. #AIProblems"
+    except httpx.ReadTimeout:
+        logger.error("Grok API request timed out. Grok must be on a coffee break.")
+        return "Sorry, I'm taking longer than usual to respond. Try again in a bit?"
     except Exception as e:
         # Log full exception traceback
-        logger.error(f"Unexpected error with Grok API: {e}")
+        logger.error(f"Unexpected error with Grok API: {e}. Grok's gone rogue!")
         logger.exception("Full exception details")
-        return "An unexpected error occurred."
+        return "An unexpected error occurred. Grok's taking a nap, I guess."
 
-
-# Step 9: Token gating (Check if the user holds the required token)
+# Step 9: Token gating (Check if the user holds the required token) - gatekeeping like it's our job
 async def check_token_ownership(chat_id):
-    has_token = True  # Replace with actual check (e.g., checking wallet balance via token address)
+    has_token = True  # Placeholder for actual check - e.g., checking wallet balance via token address
     return has_token
 
-# Step 10: Webhook handler for Telegram updates
+# Step 10: Webhook handler for Telegram updates - where the magic happens
 @app.post("/" + TELEGRAM_BOT_TOKEN)
 async def handle_webhook(request: Request):
     update = await request.json()
@@ -156,20 +159,20 @@ async def handle_webhook(request: Request):
     
     return {"status": "ok"}
 
-# Step 11: Middleware to log requests and responses
+# Step 11: Middleware to log requests and responses - because we like to keep track of everything
 @app.middleware("http")
 async def log_requests(request, call_next):
-    logger.info(f"Incoming request: {request.method} {request.url}.")
+    logger.info(f"Incoming request: {request.method} {request.url}. What's up, internet?")
     try:
         response = await call_next(request)
-        logger.info(f"Response status: {response.status_code} for {request.url}.")
+        logger.info(f"Response status: {response.status_code} for {request.url}. Peace out!")
         return response
     except Exception as e:
-        logger.error(f"Unhandled error during request: {e}.")
+        logger.error(f"Unhandled error during request: {e}. This is why we can't have nice things!")
         raise
 
-# Step 12: Ensure the application listens on the correct port
+# Step 12: Ensure the application listens on the correct port - because we need to be heard
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Get the port from the environment variable or default to 8000
-    uvicorn.run(app, host="0.0.0.0", port=port)  # Run FastAPI on the correct port
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set, 'cause we're flexible like that
+    uvicorn.run(app, host="0.0.0.0", port=port)
