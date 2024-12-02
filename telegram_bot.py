@@ -30,7 +30,7 @@ def get_env_variable(var_name: str, required: bool = True):
 
 # Step 3: Load all necessary environment variables
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
-GROK_API_KEY = get_env_variable('GROK_API_KEY')
+GROK_API_KEY = get_env_variable('GROK_API_KEY')  # Updated API key
 GROK_API_URL = get_env_variable('GROK_API_URL')
 JWK_PATH = get_env_variable('JWK_PATH')
 HUGGINGFACE_API_TOKEN = get_env_variable('HUGGINGFACE_API_TOKEN')
@@ -212,5 +212,4 @@ async def log_requests(request, call_next):
 # Step 14: Ensure the application listens on the correct port
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
