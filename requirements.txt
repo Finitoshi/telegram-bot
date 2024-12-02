@@ -1,11 +1,11 @@
 fastapi==0.115.5
 uvicorn==0.23.1
-python-telegram-bot==19.1 
-httpx==0.18.0
+python-telegram-bot==20.0  # Ensure this version is used for compatibility
+httpx==0.23.1  # Compatible with python-telegram-bot 20.0
 pymongo==4.7.1
 python-dotenv==1.0.0
 loguru==0.7.0
-solana==0.24.0
+solana==0.25.0  # Upgrade to ensure compatibility with httpx 0.23.1
 
 
 
