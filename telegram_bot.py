@@ -30,7 +30,7 @@ def get_env_variable(var_name: str, required: bool = True):
 
 # Step 3: Load all necessary environment variables
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
-GROK_API_KEY = get_env_variable('GROK_API_KEY')  # Updated API key
+GROK_API_KEY = get_env_variable('CHIBI_GROK_KEY')  # Updated to use the new API key
 GROK_API_URL = get_env_variable('GROK_API_URL')
 JWK_PATH = get_env_variable('JWK_PATH')
 HUGGINGFACE_API_TOKEN = get_env_variable('HUGGINGFACE_API_TOKEN')
@@ -209,7 +209,9 @@ async def log_requests(request, call_next):
         logger.error(f"Unhandled error during request: {e}", exc_info=True)
         raise  # Re-raise the exception to let FastAPI handle it
 
-# Step 14: Ensure the application listens on the correct port
+#Step 14: Ensure the application listens on the correct host and port
 if __name__ == "__main__":
     import uvicorn
+    logger.info("Starting FastAPI app with Uvicorn...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
