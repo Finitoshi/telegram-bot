@@ -2,7 +2,7 @@
 
 from flask import Flask, request
 from telegram.ext import Application, CommandHandler, MessageHandler
-from telegram.ext.filters import Filters
+from telegram.ext.filters import TEXT, COMMAND
 import os
 import requests
 
@@ -12,7 +12,7 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 RENDER_INTERMEDIARY_URL = os.getenv('RENDER_INTERMEDIARY_URL')
 
-# Initialize Telegram bot using Application instead of Updater
+# Initialize Telegram bot using Application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 def start(update, context):
@@ -36,7 +36,7 @@ def generate_nft(update, context):
 
 # Register handlers
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(Filters.text & ~Filters.command, generate_nft))
+application.add_handler(MessageHandler(TEXT & ~COMMAND, generate_nft))
 
 @app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
 def webhook_handler():
