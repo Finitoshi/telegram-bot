@@ -120,9 +120,19 @@ async def analyze_with_grok(text: str):
     Uses the Grok API to analyze incoming text.
     This function sends the text to Grok and returns the analysis response.
     """
-    headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
-    payload = {"text": text}  # Prepare data for Grok API
+    headers = {"Authorization": f"Bearer {GROK_API_KEY}", "Content-Type": "application/json"}
     
+    # Prepare the payload to match the structure in the provided curl
+    payload = {
+        "messages": [
+            {"role": "system", "content": "You are a test assistant."},  # System message (you can modify this)
+            {"role": "user", "content": text},  # User message
+        ],
+        "model": "grok-beta",  # Specify the model name (based on the curl example)
+        "stream": False,  # Disable streaming (can be adjusted if needed)
+        "temperature": 0,  # Control randomness in responses (0 for deterministic)
+    }
+
     try:
         # Sending request to the Grok API
         async with httpx.AsyncClient() as client:
@@ -196,22 +206,9 @@ async def test_mongo():
 @app.middleware("http")
 async def log_requests(request, call_next):
     """
-    Middleware to log incoming requests and responses, and handle unhandled errors.
+    Middleware that logs all incoming HTTP requests and their responses.
     """
-    logger.info(f"Incoming request: {request.method} {request.url}")
-    try:
-        # Process the request and generate a response
-        response = await call_next(request)
-        logger.info(f"Response status: {response.status_code} for {request.url}")
-        return response
-    except Exception as e:
-        # Log unhandled errors
-        logger.error(f"Unhandled error during request: {e}", exc_info=True)
-        raise  # Re-raise the exception to let FastAPI handle it
-
-#Step 14: Ensure the application listens on the correct host and port
-if __name__ == "__main__":
-    import uvicorn
-    logger.info("Starting FastAPI app with Uvicorn...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
+    logger.info(f"Request: {request.method} {request.url}")
+    response = await call_next(request)
+    logger.info(f"Response: {response.status_code}")
+    return response
