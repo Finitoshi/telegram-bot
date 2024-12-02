@@ -7,6 +7,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import httpx
 from pymongo import MongoClient
+import json
 
 # Step 1: Configure logging for the app - because who doesn't love a good log?
 logging.basicConfig(
@@ -31,7 +32,7 @@ def get_env_variable(var_name: str, required: bool = True):
 # Step 3: Load all necessary environment variables - 'cause we're not playing games here
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
-GROK_API_URL = get_env_variable('GROK_API_URL')
+GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
 JWK_PATH = get_env_variable('JWK_PATH')
 HUGGINGFACE_API_TOKEN = get_env_variable('HUGGINGFACE_API_TOKEN')
 HUGGINGFACE_SPACE_URL = get_env_variable('HUGGINGFACE_SPACE_URL')
@@ -89,8 +90,13 @@ async def query_grok(message):
         "Content-Type": "application/json"  # Don't forget this or you'll get a 415
     }
     payload = {
-        "message": message, 
-        "model": "grok-beta"  # Because we're using the cool beta model, duh!
+        "messages": [
+            {"role": "system", "content": "You are Grok, a chatbot inspired by the Hitchhiker's Guide to the Galaxy."},
+            {"role": "user", "content": message}
+        ],
+        "model": "grok-beta",
+        "stream": False,
+        "temperature": 0
     }
     logger.info(f"Sending to Grok API: {payload}")
     try:
@@ -99,7 +105,8 @@ async def query_grok(message):
             response.raise_for_status()
             response_data = response.json()
             logger.info(f"Grok API response: {response_data}")
-            return response_data.get('reply', "Grok did not respond properly. Guess AI has its off days too.")
+            # Assuming the response structure for chat completions
+            return response_data.get('choices', [{}])[0].get('message', {}).get('content', "Grok did not respond properly. Guess AI has its off days too.")
     except httpx.HTTPStatusError as e:
         logger.error(f"Grok API HTTP error: {e.response.text}. That's not very Grok of you!")
         return "An error occurred while querying Grok. #AIProblems"
