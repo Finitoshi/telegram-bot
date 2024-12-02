@@ -1,13 +1,13 @@
 # telegram_bot.py
 
 import logging
-from flask import Flask, request
+from fastapi import FastAPI, Request
 from telegram.ext import Application, CommandHandler
 from telegram.ext.filters import COMMAND
 import os
 import requests
 import json
-import asyncio
+import uvicorn
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_limiter.storage import MongoStorage
@@ -16,7 +16,7 @@ from flask_limiter.storage import MongoStorage
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
+app = FastAPI()
 
 # MongoDB Atlas connection string
 MONGO_URI = os.getenv('MONGO_URI')
@@ -80,16 +80,15 @@ async def generate_image_handler(update, context):
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("generateimage", generate_image_handler))
 
-@app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
-async def webhook_handler():
+@app.post('/' + TELEGRAM_BOT_TOKEN)
+async def webhook_handler(request: Request):
     """Handle incoming webhook updates from Telegram"""
-    update = request.get_json()
+    update = await request.json()
     logger.info(f"Incoming webhook update: {update}")
     await application.process_update(update)  # Directly await the async function
-    return "OK"
+    return {"status": "OK"}
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    logger.info(f"Starting Flask server on port {port}")
-    # Note: Flask doesn't support async out of the box for routes. Consider using an ASGI server for production if you're dealing with many async operations.
-    app.run(host="0.0.0.0", port=port)
+    logger.info(f"Starting Uvicorn server on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
