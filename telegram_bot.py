@@ -1,38 +1,33 @@
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
-from telegram.ext import Application
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import httpx
 from pymongo import MongoClient
 
-# Step 1: Configure logging for the app, because we gotta keep track of everything!
+# Step 1: Configure logging for the app
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),  # Output logs to the console, so we can see what's popping.
-    ],
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger("TelegramBotApp")
 
-# Step 2: Utility function to load environment variables. It's like checking if you have everything before heading out.
+# Step 2: Utility function to load environment variables with logging
 def get_env_variable(var_name: str, required: bool = True):
-    """
-    This function gets your environment variable and checks if it's there.
-    If it's required and missing, it'll stop you in your tracks.
-    """
     value = os.getenv(var_name)
     if value:
-        logger.info(f"Environment variable '{var_name}' loaded successfully. ✅")
+        logger.info(f"Environment variable '{var_name}' loaded successfully.")
     elif required:
-        logger.error(f"Environment variable '{var_name}' is required but not set. 💥")
+        logger.error(f"Environment variable '{var_name}' is required but not set.")
         raise ValueError(f"Missing required environment variable: {var_name}")
     else:
-        logger.warning(f"Environment variable '{var_name}' is not set (but it's chill).")
+        logger.warning(f"Environment variable '{var_name}' is not set (optional).")
     return value
 
-# Step 3: Load all your environment variables like a pro, making sure you're ready to rock and roll.
+# Step 3: Load all necessary environment variables
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL')
@@ -43,130 +38,143 @@ RENDER_INTERMEDIARY_URL = get_env_variable('RENDER_INTERMEDIARY_URL')
 RENDER_TG_BOT_WEBHOOK_URL = get_env_variable('RENDER_TG_BOT_WEBHOOK_URL')
 MONGO_URI = get_env_variable('MONGO_URI')
 
-# Step 4: Initialize your Telegram bot. Time to connect with the world, fam.
+# Step 4: Initialize the Telegram bot application using the provided token
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Step 5: FastAPI application setup with lifecycle management – just like keeping track of your vibes all day long.
+# Step 5: FastAPI application with detailed lifecycle management using context managers
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    This is where the app gets started and shut down like a well-oiled machine. The bot gets initialized, 
-    the webhook gets set, and everything starts or stops as needed.
+    Manages the startup and shutdown lifecycle of the application. This handles
+    Telegram bot initialization, webhook setup, and cleanup on shutdown.
     """
-    # Startup: Let’s kick things off.
-    logger.info("Initializing Telegram bot app... 🔥")
+    logger.info("Initializing Telegram bot application... 🔥")
     await application.initialize()
-    logger.info("Telegram app initialized, all set to go! 🚀")
+    logger.info("Telegram application initialized, all set to go! 🚀")
 
-    logger.info("Starting the Telegram bot app... 🚀")
+    logger.info("Starting the Telegram bot application... 🚀")
     await application.start()
     logger.info("Telegram bot started, we are live! 🔥")
 
-    # Setting up the webhook: Gotta let Telegram know where to send those updates.
+    # Set webhook URL
     webhook_url = f"{RENDER_TG_BOT_WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
     logger.info(f"Setting webhook with this URL: {webhook_url} 💥")
     try:
         await application.bot.set_webhook(url=webhook_url)
         logger.info("Webhook set successfully. 🏆")
     except Exception as e:
-        logger.error(f"Failed to set webhook. 🛑 Error: {e}", exc_info=True)
+        logger.error(f"Error setting webhook: {e}", exc_info=True)
 
-    yield  # The app runs while it's up and running.
+    yield  # The application runs here
 
-    # Shutdown: Time to wrap it up like a pro.
-    logger.info("Shutting down Telegram bot app... 👋")
+    # Shutdown logic
+    logger.info("Stopping Telegram bot application... 🚨")
     await application.stop()
-    logger.info("Telegram bot stopped. All done! ✅")
+    logger.info("Telegram bot stopped successfully. 🛑")
 
-    logger.info("Cleaning up... ✨")
+    logger.info("Shutting down Telegram bot application... 💤")
     await application.shutdown()
-    logger.info("Telegram app shutdown complete. 👌")
+    logger.info("Telegram bot shutdown complete. ✅")
 
-# Step 6: Initialize FastAPI app with the lifecycle management from above.
+# Step 6: Initialize the FastAPI app with lifecycle management
 app = FastAPI(lifespan=lifespan)
 
-# Step 7: Health check endpoint – Just like checking if everything's working. ✨
+# Step 7: Example route for health check
 @app.get("/")
 async def health_check():
     """
-    Health check endpoint to verify the service is up and running.
-    Because hey, we gotta make sure we’re not down for the count.
+    Health check endpoint to verify that the service is running and responsive.
     """
-    logger.info("Health check initiated. Are we good to go? ✔️")
-    return {"status": "ok", "message": "The app is alive and well!"}
+    logger.info("Health check endpoint accessed.")
+    return {"status": "ok"}
 
-# Step 8: Integrate with external services (like Grok and HuggingFace), because why not make this bot smarter? 🤖
+# Step 8: Webhook handler for Telegram updates
+@app.post("/" + TELEGRAM_BOT_TOKEN)
+async def handle_webhook(request: Request):
+    """
+    This route handles webhook updates from Telegram and processes them.
+    It receives POST requests from Telegram when a message is sent to the bot.
+    """
+    update = await request.json()
+    logger.info(f"Received update: {update}")
+    
+    # You can process the update here. For example, handle commands or messages
+    telegram_update = Update.de_json(update, application.bot)
+    # Example: echo the received message
+    await application.bot.send_message(chat_id=telegram_update.message.chat_id, text="Received your message! 🔥")
+    
+    return {"status": "ok"}
 
-# Test Grok API integration – let’s make sure we’re talking to the right people.
+# Step 9: Test integration with the Grok API
 @app.get("/test-grok")
 async def test_grok():
     """
-    Test the connection to the Grok API. Gotta make sure it's all set up for data flow.
+    Endpoint to test the integration with the Grok API.
     """
-    logger.info("Testing Grok API... 🧠")
+    logger.info("Testing Grok API integration...")
     headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
     try:
         response = httpx.post(GROK_API_URL, headers=headers, json={"test": "ping"})
-        response.raise_for_status()  # Make sure it doesn't come back with an error.
-        logger.info(f"Grok API response: {response.json()} 💬")
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        logger.info(f"Grok API response: {response.json()}")
         return response.json()
     except Exception as e:
-        logger.error(f"Grok API error: {e} 😔", exc_info=True)
+        logger.error(f"Grok API error: {e}", exc_info=True)
         return {"error": str(e)}
 
-# Test HuggingFace API connection – keeping things fresh with AI-powered insights.
+# Test integration with HuggingFace API
 @app.get("/test-huggingface")
 async def test_huggingface():
     """
-    Test HuggingFace API connection. Because AI is cool, right?
+    Endpoint to test the connection with the HuggingFace API.
     """
-    logger.info("Testing HuggingFace API... 🔥")
+    logger.info("Testing HuggingFace API integration...")
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
     try:
         response = httpx.get(HUGGINGFACE_SPACE_URL, headers=headers)
         response.raise_for_status()
-        logger.info(f"HuggingFace response: {response.text} 🚀")
-        return {"message": "HuggingFace connection successful. AI power is real!"}
+        logger.info(f"HuggingFace response: {response.text}")
+        return {"message": "HuggingFace connection successful"}
     except Exception as e:
-        logger.error(f"HuggingFace API error: {e} 🤖", exc_info=True)
+        logger.error(f"HuggingFace API error: {e}", exc_info=True)
         return {"error": str(e)}
 
-# Step 9: Test MongoDB connection – Gotta make sure we're storing stuff safely.
+# Test connection to MongoDB
 @app.get("/test-mongo")
 async def test_mongo():
     """
-    Test the MongoDB connection. Storing data is important – we don’t want to lose anything!
+    Endpoint to test the connection to MongoDB.
     """
-    logger.info("Testing MongoDB connection... 🧑‍💻")
+    logger.info("Testing MongoDB connection...")
     try:
         client = MongoClient(MONGO_URI)
         db = client.get_database()
-        logger.info(f"Connected to MongoDB. Database: {db.name} 📦")
+        logger.info(f"MongoDB connected successfully. Database: {db.name}")
         return {"message": f"Connected to MongoDB: {db.name}"}
     except Exception as e:
-        logger.error(f"MongoDB connection error: {e} 💥", exc_info=True)
+        logger.error(f"MongoDB connection error: {e}", exc_info=True)
         return {"error": str(e)}
 
-# Step 10: Middleware to log all incoming requests – gotta keep tabs on everything coming through. 👀
+# Step 10: Middleware to log requests and responses, also logs unhandled errors
 @app.middleware("http")
 async def log_requests(request, call_next):
     """
-    Logs all incoming requests and responses. Also catches errors if anything goes wrong.
-    Like keeping track of every message in your inbox.
+    Middleware to log incoming requests and the responses returned by the API.
+    Also handles logging of any unhandled errors during request processing.
     """
-    logger.info(f"Incoming request: {request.method} {request.url} 📡")
+    logger.info(f"Incoming request: {request.method} {request.url}")
     try:
-        # Process the request and send the response.
+        # Process the request and generate a response
         response = await call_next(request)
-        logger.info(f"Response status: {response.status_code} for {request.url} ✅")
+        logger.info(f"Response status: {response.status_code} for {request.url}")
         return response
     except Exception as e:
-        # If something goes wrong, we catch it and log it.
-        logger.error(f"Unhandled error: {e} 🛑", exc_info=True)
-        raise  # Re-raise the exception so FastAPI can handle it.
+        # Log unhandled errors
+        logger.error(f"Unhandled error during request: {e}", exc_info=True)
+        raise  # Re-raise the exception to let FastAPI handle it
 
-# Step 11: Ensure the app is listening on the right port. No excuses.
+# Step 11: Ensure the application listens on the correct port
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Default to port 8000 if it's not set.
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
     uvicorn.run(app, host="0.0.0.0", port=port)
