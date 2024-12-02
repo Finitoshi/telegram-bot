@@ -94,19 +94,23 @@ async def query_grok(message):
         "stream": False,
         "temperature": 0
     }
-    logger.debug(f"Sending to Grok API: {json.dumps(payload, indent=2)}")  # Log the request payload in detail
+    logger.info(f"Sending to Grok API: {payload}")
+    
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(GROK_API_URL, headers=headers, json=payload)
-            logger.debug(f"Grok API response status: {response.status_code}")  # Log the response status code
-            response.raise_for_status()  # Raise an error for bad responses
-            response_data = response.json()
-
-            # Log the full response body for debugging purposes
-            logger.debug(f"Grok API full response: {json.dumps(response_data, indent=2)}")
+            # Log the status code and raw response for better error tracking
+            logger.info(f"Received response from Grok API: Status code {response.status_code}")
+            logger.debug(f"Response content: {response.text}")
             
+            response.raise_for_status()  # This will raise an error for HTTP errors
+            response_data = response.json()
+            logger.info(f"Grok API response: {response_data}")
+            
+            # Extract response from Grok API
             grok_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', "Grok did not respond properly.")
             
+            # Cache the response
             cache_data = {
                 "message": message,
                 "response": grok_response,
@@ -115,11 +119,15 @@ async def query_grok(message):
             cache_collection.insert_one(cache_data)
             return grok_response
     except httpx.HTTPStatusError as e:
-        logger.error(f"Grok API HTTP error: {e.response.text}. Status Code: {e.response.status_code}.")
+        # Log the specific HTTP error details
+        logger.error(f"Grok API HTTP error: Status code {e.response.status_code}, Response: {e.response.text}")
         return "An error occurred while querying Grok."
     except Exception as e:
-        logger.error(f"Unexpected error with Grok API: {e}.")
+        # Log full exception traceback
+        logger.error(f"Unexpected error with Grok API: {e}")
+        logger.exception("Full exception details")
         return "An unexpected error occurred."
+
 
 # Step 9: Token gating (Check if the user holds the required token)
 async def check_token_ownership(chat_id):
