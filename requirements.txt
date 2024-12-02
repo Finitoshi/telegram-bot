@@ -1,5 +1,6 @@
-Flask[async]
+# requirements.txt
+flask-limiter==3.1.0
+Flask
 python-telegram-bot
 requests
-asyncio
-flask-limiter==3.1.0
+pymongo
