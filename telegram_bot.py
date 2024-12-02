@@ -6,18 +6,22 @@ from telegram.ext import Application
 import httpx
 from pymongo import MongoClient
 
-# Configure logging
+# Step 1: Configure logging for the app
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),
+        logging.StreamHandler(),  # Logs output to the console
     ],
 )
 logger = logging.getLogger("TelegramBotApp")
 
-# Load environment variables with logging
+# Step 2: Utility function to load environment variables with logging
 def get_env_variable(var_name: str, required: bool = True):
+    """
+    This function retrieves the value of an environment variable and logs its status.
+    If the variable is not found and is required, it raises an error.
+    """
     value = os.getenv(var_name)
     if value:
         logger.info(f"Environment variable '{var_name}' loaded successfully.")
@@ -28,7 +32,7 @@ def get_env_variable(var_name: str, required: bool = True):
         logger.warning(f"Environment variable '{var_name}' is not set (optional).")
     return value
 
-# Load environment variables
+# Step 3: Load all necessary environment variables
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL')
@@ -39,12 +43,16 @@ RENDER_INTERMEDIARY_URL = get_env_variable('RENDER_INTERMEDIARY_URL')
 RENDER_TG_BOT_WEBHOOK_URL = get_env_variable('RENDER_TG_BOT_WEBHOOK_URL')
 MONGO_URI = get_env_variable('MONGO_URI')
 
-# Telegram bot application
+# Step 4: Initialize the Telegram bot application using the provided token
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# FastAPI application with detailed lifecycle management
+# Step 5: FastAPI application with detailed lifecycle management using context managers
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Manages the startup and shutdown lifecycle of the application. This handles
+    Telegram bot initialization, webhook setup, and cleanup on shutdown.
+    """
     # Startup logic
     logger.info("Initializing Telegram bot application...")
     await application.initialize()
@@ -54,7 +62,7 @@ async def lifespan(app: FastAPI):
     await application.start()
     logger.info("Telegram application started successfully.")
 
-    # Set webhook
+    # Set webhook URL
     webhook_url = f"{RENDER_TG_BOT_WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
     logger.info(f"Attempting to set webhook with URL: {webhook_url}")
     try:
@@ -63,7 +71,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error setting webhook: {e}", exc_info=True)
 
-    yield  # Application runs here
+    yield  # The application runs here
 
     # Shutdown logic
     logger.info("Stopping Telegram application...")
@@ -74,30 +82,43 @@ async def lifespan(app: FastAPI):
     await application.shutdown()
     logger.info("Telegram application shutdown complete.")
 
+# Step 6: Initialize the FastAPI app with lifecycle management
 app = FastAPI(lifespan=lifespan)
 
-# Example route for health check
+# Step 7: Example route for health check
 @app.get("/")
 async def health_check():
+    """
+    Health check endpoint to verify that the service is running and responsive.
+    """
     logger.info("Health check endpoint accessed.")
     return {"status": "ok"}
 
-# Example usage of external services with detailed logging
+# Step 8: Example usage of external services with detailed logging
+
+# Test integration with the Grok API
 @app.get("/test-grok")
 async def test_grok():
+    """
+    Endpoint to test the integration with the Grok API.
+    """
     logger.info("Testing Grok API integration...")
     headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
     try:
         response = httpx.post(GROK_API_URL, headers=headers, json={"test": "ping"})
-        response.raise_for_status()
+        response.raise_for_status()  # Raise an exception for HTTP errors
         logger.info(f"Grok API response: {response.json()}")
         return response.json()
     except Exception as e:
         logger.error(f"Grok API error: {e}", exc_info=True)
         return {"error": str(e)}
 
+# Test integration with HuggingFace API
 @app.get("/test-huggingface")
 async def test_huggingface():
+    """
+    Endpoint to test the connection with the HuggingFace API.
+    """
     logger.info("Testing HuggingFace API integration...")
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
     try:
@@ -109,8 +130,12 @@ async def test_huggingface():
         logger.error(f"HuggingFace API error: {e}", exc_info=True)
         return {"error": str(e)}
 
+# Test connection to MongoDB
 @app.get("/test-mongo")
 async def test_mongo():
+    """
+    Endpoint to test the connection to MongoDB.
+    """
     logger.info("Testing MongoDB connection...")
     try:
         client = MongoClient(MONGO_URI)
@@ -121,14 +146,20 @@ async def test_mongo():
         logger.error(f"MongoDB connection error: {e}", exc_info=True)
         return {"error": str(e)}
 
-# Additional logging for unexpected errors
+# Step 9: Middleware to log requests and responses, also logs unhandled errors
 @app.middleware("http")
 async def log_requests(request, call_next):
+    """
+    Middleware to log incoming requests and the responses returned by the API.
+    Also handles logging of any unhandled errors during request processing.
+    """
     logger.info(f"Incoming request: {request.method} {request.url}")
     try:
+        # Process the request and generate a response
         response = await call_next(request)
         logger.info(f"Response status: {response.status_code} for {request.url}")
         return response
     except Exception as e:
+        # Log unhandled errors
         logger.error(f"Unhandled error during request: {e}", exc_info=True)
-        raise
+        raise  # Re-raise the exception to let FastAPI handle it
