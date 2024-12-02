@@ -18,9 +18,9 @@ app = Flask(__name__)
 
 # Rate Limiting Setup
 limiter = Limiter(
-    app,
+    app=app,
     key_func=get_remote_address,
-    default_limits=["1 per minute"],
+    default_limits=["1 per minute"]
 )
 
 # Load environment variables
