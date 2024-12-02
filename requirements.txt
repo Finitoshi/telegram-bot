@@ -2,4 +2,4 @@ Flask[async]
 python-telegram-bot
 requests
 asyncio
-flask-limiter==3.0.0
+flask-limiter==3.1.0
