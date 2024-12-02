@@ -84,14 +84,21 @@ async def health_check():
 
 # New function to interact with Grok API
 async def query_grok(message):
-    headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
+    headers = {
+        "Authorization": f"Bearer {GROK_API_KEY}",
+        "Content-Type": "application/json"  # Ensure this matches API expectations
+    }
+    payload = {"message": message}  # Assuming this is the correct structure
+    logger.info(f"Sending to Grok API: {payload}")
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(GROK_API_URL, headers=headers, json={"message": message})
+            response = await client.post(GROK_API_URL, headers=headers, json=payload)
             response.raise_for_status()
-            return response.json().get('reply', "Grok did not respond properly.")
+            response_data = response.json()
+            logger.info(f"Grok API response: {response_data}")
+            return response_data.get('reply', "Grok did not respond properly.")
     except httpx.HTTPStatusError as e:
-        logger.error(f"Grok API HTTP error: {e}")
+        logger.error(f"Grok API HTTP error: {e.response.text}")
         return "An error occurred while querying Grok."
     except Exception as e:
         logger.error(f"Unexpected error with Grok API: {e}")
