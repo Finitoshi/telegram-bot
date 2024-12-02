@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 
 # Step 1: Configure logging for the app
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Change level to DEBUG for more detailed logs
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
@@ -94,13 +94,17 @@ async def query_grok(message):
         "stream": False,
         "temperature": 0
     }
-    logger.info(f"Sending to Grok API: {payload}")
+    logger.debug(f"Sending to Grok API: {json.dumps(payload, indent=2)}")  # Log the request payload in detail
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(GROK_API_URL, headers=headers, json=payload)
-            response.raise_for_status()
+            logger.debug(f"Grok API response status: {response.status_code}")  # Log the response status code
+            response.raise_for_status()  # Raise an error for bad responses
             response_data = response.json()
-            logger.info(f"Grok API response: {response_data}")
+
+            # Log the full response body for debugging purposes
+            logger.debug(f"Grok API full response: {json.dumps(response_data, indent=2)}")
+            
             grok_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', "Grok did not respond properly.")
             
             cache_data = {
@@ -111,7 +115,7 @@ async def query_grok(message):
             cache_collection.insert_one(cache_data)
             return grok_response
     except httpx.HTTPStatusError as e:
-        logger.error(f"Grok API HTTP error: {e.response.text}.")
+        logger.error(f"Grok API HTTP error: {e.response.text}. Status Code: {e.response.status_code}.")
         return "An error occurred while querying Grok."
     except Exception as e:
         logger.error(f"Unexpected error with Grok API: {e}.")
@@ -119,8 +123,6 @@ async def query_grok(message):
 
 # Step 9: Token gating (Check if the user holds the required token)
 async def check_token_ownership(chat_id):
-    # Here, you would call the blockchain API or wallet service to check if the user holds the required token
-    # For demonstration, we're assuming the user has the token.
     has_token = True  # Replace with actual check (e.g., checking wallet balance via token address)
     return has_token
 
@@ -128,7 +130,7 @@ async def check_token_ownership(chat_id):
 @app.post("/" + TELEGRAM_BOT_TOKEN)
 async def handle_webhook(request: Request):
     update = await request.json()
-    logger.info(f"Received update: {update}")
+    logger.info(f"Received update: {json.dumps(update, indent=2)}")  # Log the entire received update
     telegram_update = Update.de_json(update, application.bot)
     
     if telegram_update.message and telegram_update.message.text:
