@@ -4,3 +4,4 @@ uvicorn
 pymongo
 python-telegram-bot
 requests
+aiohttp
