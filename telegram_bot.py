@@ -1,8 +1,8 @@
 # telegram_bot.py
 
 from flask import Flask, request
-from telegram.ext import Updater, CommandHandler, MessageHandler, Dispatcher
-from telegram.ext.filters import Filters  # Updated import for newer versions of python-telegram-bot
+from telegram.ext import Application, CommandHandler, MessageHandler
+from telegram.ext.filters import Filters
 import os
 import requests
 
@@ -12,9 +12,8 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 RENDER_INTERMEDIARY_URL = os.getenv('RENDER_INTERMEDIARY_URL')
 
-# Initialize Telegram bot
-updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Initialize Telegram bot using Application instead of Updater
+application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
 def start(update, context):
     """Handler for /start command"""
@@ -36,14 +35,14 @@ def generate_nft(update, context):
         context.bot.send_message(chat_id=update.effective_chat.id, text="Something went wrong!")
 
 # Register handlers
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, generate_nft))
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(Filters.text & ~Filters.command, generate_nft))
 
 @app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
 def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
-    dispatcher.process_update(update)
+    application.update_queue.put(update)
     return "OK"
 
 if __name__ == '__main__':
