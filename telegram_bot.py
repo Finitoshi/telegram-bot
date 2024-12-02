@@ -41,7 +41,7 @@ GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
 MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
-SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL')  # Solana RPC endpoint
+SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
 
 # Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
 client = MongoClient(MONGO_URI)
