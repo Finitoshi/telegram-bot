@@ -7,6 +7,7 @@ from telegram.ext.filters import TEXT, COMMAND
 import os
 import requests
 import json
+import asyncio  # Added for async operations
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -92,7 +93,10 @@ def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
     logger.info(f"Incoming webhook update: {update}")
-    application.update_queue.put(update)  # This should be synchronous
+    
+    # Use asyncio.run_coroutine_threadsafe to handle async queue in sync context
+    asyncio.run_coroutine_threadsafe(application.update_queue.put(update), asyncio.get_event_loop())
+    
     return "OK"
 
 if __name__ == '__main__':
