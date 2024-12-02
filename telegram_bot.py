@@ -125,12 +125,16 @@ async def analyze_with_grok(text: str):
     
     try:
         # Sending request to the Grok API
-        response = await httpx.post(GROK_API_URL, headers=headers, json=payload)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        analysis_result = response.json()  # Parse the JSON response
-        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(GROK_API_URL, headers=headers, json=payload)
+            response.raise_for_status()  # Raise an exception for HTTP errors
+            analysis_result = response.json()  # Parse the JSON response
+            
         logger.info(f"Grok analysis result: {analysis_result}")
         return analysis_result
+    except httpx.HTTPStatusError as e:
+        logger.error(f"HTTP error occurred: {e}", exc_info=True)
+        return {"error": f"HTTP error: {e.response.status_code}"}
     except Exception as e:
         logger.error(f"Grok API error: {e}", exc_info=True)
         return {"error": str(e)}
@@ -145,10 +149,11 @@ async def test_grok():
     headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
     try:
         # Sending a test request to the Grok API
-        response = httpx.post(GROK_API_URL, headers=headers, json={"test": "ping"})
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        logger.info(f"Grok API response: {response.json()}")
-        return response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(GROK_API_URL, headers=headers, json={"test": "ping"})
+            response.raise_for_status()  # Raise an exception for HTTP errors
+            logger.info(f"Grok API response: {response.json()}")
+            return response.json()
     except Exception as e:
         logger.error(f"Grok API error: {e}", exc_info=True)
         return {"error": str(e)}
@@ -162,10 +167,11 @@ async def test_huggingface():
     logger.info("Testing HuggingFace API integration...")
     headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
     try:
-        response = httpx.get(HUGGINGFACE_SPACE_URL, headers=headers)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        logger.info(f"HuggingFace response: {response.text}")
-        return {"message": "HuggingFace connection successful"}
+        async with httpx.AsyncClient() as client:
+            response = await client.get(HUGGINGFACE_SPACE_URL, headers=headers)
+            response.raise_for_status()  # Raise an exception for HTTP errors
+            logger.info(f"HuggingFace response: {response.text}")
+            return {"message": "HuggingFace connection successful"}
     except Exception as e:
         logger.error(f"HuggingFace API error: {e}", exc_info=True)
         return {"error": str(e)}
@@ -190,8 +196,7 @@ async def test_mongo():
 @app.middleware("http")
 async def log_requests(request, call_next):
     """
-    Middleware to log incoming requests and the responses returned by the API.
-    Also handles logging of any unhandled errors during request processing.
+    Middleware to log incoming requests and responses, and handle unhandled errors.
     """
     logger.info(f"Incoming request: {request.method} {request.url}")
     try:
@@ -204,3 +209,8 @@ async def log_requests(request, call_next):
         logger.error(f"Unhandled error during request: {e}", exc_info=True)
         raise  # Re-raise the exception to let FastAPI handle it
 
+# Step 14: Ensure the application listens on the correct port
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
+    uvicorn.run(app, host="0.0.0.0", port=port)
