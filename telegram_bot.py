@@ -7,10 +7,10 @@ from telegram.ext.filters import TEXT, COMMAND
 import os
 import requests
 import json
-import asyncio  # Added for async operations
+import asyncio
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -35,7 +35,7 @@ def generate_nft(update, context):
     logger.info(f"Generating NFT for prompt: {prompt}")
 
     try:
-        response = requests.post(RENDER_INTERMEDIARY_URL, json={'prompt': prompt})
+        response = requests.post(RENDER_INTERMEDIARY_URL, json={'prompt': prompt}, timeout=30)  # Added timeout
         response.raise_for_status()
         data = response.json()
         if 'image' in data:
@@ -74,7 +74,7 @@ async def ask_grok(update, context):
     }
 
     try:
-        response = requests.post(GROK_API_URL, headers=headers, json=payload)
+        response = requests.post(GROK_API_URL, headers=headers, json=payload, timeout=30)  # Added timeout
         response.raise_for_status()
         grok_response = response.json().get('choices', [{}])[0].get('message', {}).get('content', "I'm having a tough time thinking. Try again?")
         await context.bot.send_message(chat_id=update.effective_chat.id, text=grok_response)
@@ -94,13 +94,16 @@ def webhook_handler():
     update = request.get_json()
     logger.info(f"Incoming webhook update: {update}")
     
-    # Use asyncio.run_coroutine_threadsafe to handle async queue in sync context
-    asyncio.run_coroutine_threadsafe(application.update_queue.put(update), asyncio.get_event_loop())
+    try:
+        # Use asyncio.run to handle async operation in sync context
+        asyncio.run(application.update_queue.put(update))
+        logger.debug("Update successfully added to queue")
+    except Exception as e:
+        logger.error(f"Failed to add update to queue: {str(e)}")
     
     return "OK"
 
 if __name__ == '__main__':
-    # This will be set by Render.com
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting Flask server on port {port}")
     app.run(host="0.0.0.0", port=port)
