@@ -7,19 +7,25 @@ from telegram.ext.filters import TEXT, COMMAND
 import os
 import requests
 import json
-import asyncio
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Rate Limiting Setup
+limiter = Limiter(
+    app,
+    key_func=get_remote_address,
+    default_limits=["1 per minute"]
+)
+
 # Load environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-RENDER_INTERMEDIARY_URL = os.getenv('RENDER_INTERMEDIARY_URL')
-GROK_API_KEY = os.getenv('GROK_API_KEY')
-GROK_API_URL = os.getenv('GROK_API_URL')
+HUGGINGFACE_SPACE_URL = "https://finitoshi-chibi-bfl-flux-1-schnell.hf.space"
 
 # Initialize Telegram bot using Application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -27,82 +33,49 @@ application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 def start(update, context):
     """Handler for /start command"""
     logger.info(f"Received /start command from user {update.effective_user.id}")
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome! You can ask me questions or generate an NFT by sending a prompt.")
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome! You can generate an NFT by using /generateimage <prompt>.")
 
-def generate_nft(update, context):
-    """Handler for NFT generation"""
-    logger.info("Entering generate_nft handler")
-    prompt = update.message.text
-    logger.info(f"Generating NFT for prompt: {prompt}")
-
+@limiter.limit("1 per minute")  # Rate limit the generateimage command
+def generate_image_handler(update, context):
+    """Handler for /generateimage command"""
+    chat_id = update.effective_chat.id
     try:
-        response = requests.post(RENDER_INTERMEDIARY_URL, json={'prompt': prompt}, timeout=30)  # Added timeout
+        if len(context.args) < 1:
+            context.bot.send_message(chat_id=chat_id, text="Please provide a prompt after the command. Example: /generateimage cute chibi robot")
+            return
+
+        prompt = " ".join(context.args)
+        logger.info(f"Generating image for prompt: {prompt}")
+        
+        # Direct API call to Gradio for image generation
+        response = requests.post(
+            f"{HUGGINGFACE_SPACE_URL}/api/predict/",
+            json={"param_0": prompt}
+        )
         response.raise_for_status()
-        data = response.json()
-        if 'image' in data:
-            context.bot.send_photo(chat_id=update.effective_chat.id, photo=data['image'])
-            logger.info(f"NFT Image sent to user {update.effective_user.id}")
+        result = response.json()
+        
+        if 'url' in result['data'][0]:
+            context.bot.send_photo(chat_id=chat_id, photo=result['data'][0]['url'])
+            logger.info(f"Image sent to user {update.effective_user.id}")
         else:
-            context.bot.send_message(chat_id=update.effective_chat.id, text="NFT generation failed.")
-            logger.error("NFT generation failed, no image in response")
+            context.bot.send_message(chat_id=chat_id, text="Failed to generate image. No URL found in response.")
+            logger.error("Image generation failed, no URL in response")
+    
     except requests.RequestException as e:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Something went wrong with NFT generation!")
-        logger.error(f"Error in NFT generation: {str(e)}")
-
-async def ask_grok(update, context):
-    """Handler for general messages using Grok API"""
-    logger.info("Entering ask_grok handler")
-    query = update.message.text
-    logger.info(f"User {update.effective_user.id} asked Grok: {query}")
-
-    headers = {
-        'Authorization': f'Bearer {GROK_API_KEY}',
-        'Content-Type': 'application/json'
-    }
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are Grok, an AI with a sense of humor and helpfulness, providing answers with wit and insight."
-            },
-            {
-                "role": "user",
-                "content": query
-            }
-        ],
-        "model": "grok-beta",
-        "stream": False,
-        "temperature": 0.7
-    }
-
-    try:
-        response = requests.post(GROK_API_URL, headers=headers, json=payload, timeout=30)  # Added timeout
-        response.raise_for_status()
-        grok_response = response.json().get('choices', [{}])[0].get('message', {}).get('content', "I'm having a tough time thinking. Try again?")
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=grok_response)
-        logger.info(f"Grok responded to user {update.effective_user.id}")
-    except requests.RequestException as e:
-        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Sorry, I encountered an error: {str(e)}")
-        logger.error(f"Grok API error: {str(e)}")
+        context.bot.send_message(chat_id=chat_id, text=f"Failed to generate image: {str(e)}")
+        logger.error(f"Error in image generation: {str(e)}")
 
 # Register handlers
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(TEXT & ~COMMAND, ask_grok))  # This will handle general messages
-application.add_handler(MessageHandler(TEXT & ~COMMAND, generate_nft))  # This will handle NFT generation
+application.add_handler(CommandHandler("generateimage", generate_image_handler))
 
 @app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
 def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
     logger.info(f"Incoming webhook update: {update}")
-    
-    try:
-        # Use asyncio.run to handle async operation in sync context
-        asyncio.run(application.update_queue.put(update))
-        logger.debug("Update successfully added to queue")
-    except Exception as e:
-        logger.error(f"Failed to add update to queue: {str(e)}")
-    
+    application.process_update(update)  # Process updates synchronously
     return "OK"
 
 if __name__ == '__main__':
