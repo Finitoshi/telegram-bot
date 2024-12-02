@@ -7,7 +7,7 @@ python-dotenv==1.0.0
 loguru==0.7.0
 solana==0.25.0  # Upgrade to ensure compatibility with httpx 0.23.1
 tenacity==8.2.2
-
+cryptography==3.4.7
 
 
 
