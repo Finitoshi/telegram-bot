@@ -1,7 +1,7 @@
-# requirements.txt
-fastapi
-uvicorn
-pymongo
-python-telegram-bot
-requests
-aiohttp
+fastapi==0.103.1
+uvicorn==0.22.0
+python-telegram-bot==20.6
+pymongo[srv]==4.7.1
+httpx==0.25.0
+python-dotenv==1.0.0
+loguru==0.7.0
