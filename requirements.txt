@@ -1,8 +1,6 @@
 # requirements.txt
-flask-limiter==3.9.2
-Flask
+fastapi
+uvicorn
+pymongo
 python-telegram-bot
 requests
-pymongo
-uvicorn
-fastapi
