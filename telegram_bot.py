@@ -75,10 +75,10 @@ application.add_handler(MessageHandler(TEXT & ~COMMAND, ask_grok))  # This will 
 application.add_handler(MessageHandler(TEXT & ~COMMAND, generate_nft))  # This will handle NFT generation
 
 @app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
-async def webhook_handler():
+def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
-    await application.process_update(update)
+    application.update_queue.put(update)  # This should be synchronous
     return "OK"
 
 if __name__ == '__main__':
