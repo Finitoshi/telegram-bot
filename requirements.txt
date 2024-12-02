@@ -4,3 +4,5 @@ Flask
 python-telegram-bot
 requests
 pymongo
+uvicorn
+fastapi
