@@ -31,6 +31,7 @@ def start(update, context):
 
 def generate_nft(update, context):
     """Handler for NFT generation"""
+    logger.info("Entering generate_nft handler")
     prompt = update.message.text
     logger.info(f"Generating NFT for prompt: {prompt}")
 
@@ -50,6 +51,7 @@ def generate_nft(update, context):
 
 async def ask_grok(update, context):
     """Handler for general messages using Grok API"""
+    logger.info("Entering ask_grok handler")
     query = update.message.text
     logger.info(f"User {update.effective_user.id} asked Grok: {query}")
 
