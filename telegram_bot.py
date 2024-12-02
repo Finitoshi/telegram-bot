@@ -1,12 +1,13 @@
 # telegram_bot.py
 
 import logging
-from flask import Flask, request, g
-from telegram.ext import Application, CommandHandler, MessageHandler
-from telegram.ext.filters import TEXT, COMMAND
+from flask import Flask, request
+from telegram.ext import Application, CommandHandler
+from telegram.ext.filters import COMMAND
 import os
 import requests
 import json
+import asyncio
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_limiter.storage import MongoStorage
@@ -45,12 +46,12 @@ def start(update, context):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Welcome! You can generate an NFT by using /generateimage <prompt>.")
 
 @limiter.limit("1 per minute")  # Rate limit the generateimage command
-def generate_image_handler(update, context):
+async def generate_image_handler(update, context):
     """Handler for /generateimage command"""
     chat_id = update.effective_chat.id
     try:
-        if len(context.args) < 1:
-            context.bot.send_message(chat_id=chat_id, text="Please provide a prompt after the command. Example: /generateimage cute chibi robot")
+        if not context.args:
+            await context.bot.send_message(chat_id=chat_id, text="Please provide a prompt after the command. Example: /generateimage cute chibi robot")
             return
 
         prompt = " ".join(context.args)
@@ -65,14 +66,14 @@ def generate_image_handler(update, context):
         result = response.json()
         
         if 'url' in result['data'][0]:
-            context.bot.send_photo(chat_id=chat_id, photo=result['data'][0]['url'])
+            await context.bot.send_photo(chat_id=chat_id, photo=result['data'][0]['url'])
             logger.info(f"Image sent to user {update.effective_user.id}")
         else:
-            context.bot.send_message(chat_id=chat_id, text="Failed to generate image. No URL found in response.")
+            await context.bot.send_message(chat_id=chat_id, text="Failed to generate image. No URL found in response.")
             logger.error("Image generation failed, no URL in response")
     
     except requests.RequestException as e:
-        context.bot.send_message(chat_id=chat_id, text=f"Failed to generate image: {str(e)}")
+        await context.bot.send_message(chat_id=chat_id, text=f"Failed to generate image: {str(e)}")
         logger.error(f"Error in image generation: {str(e)}")
 
 # Register handlers
@@ -80,14 +81,15 @@ application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("generateimage", generate_image_handler))
 
 @app.route('/' + TELEGRAM_BOT_TOKEN, methods=['POST'])
-def webhook_handler():
+async def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
     logger.info(f"Incoming webhook update: {update}")
-    asyncio.run(application.process_update(update))  # Use asyncio.run for async function in sync context
+    await application.process_update(update)  # Directly await the async function
     return "OK"
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting Flask server on port {port}")
+    # Note: Flask doesn't support async out of the box for routes. Consider using an ASGI server for production if you're dealing with many async operations.
     app.run(host="0.0.0.0", port=port)
