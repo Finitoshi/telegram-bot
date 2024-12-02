@@ -163,3 +163,9 @@ async def log_requests(request, call_next):
         # Log unhandled errors
         logger.error(f"Unhandled error during request: {e}", exc_info=True)
         raise  # Re-raise the exception to let FastAPI handle it
+
+# Step 10: Ensure the application listens on the correct port
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
+    uvicorn.run(app, host="0.0.0.0", port=port)
