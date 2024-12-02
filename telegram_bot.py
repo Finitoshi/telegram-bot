@@ -33,6 +33,7 @@ rate_limits = db.rate_limits
 # Initialize Telegram bot
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
+
 # Utility: Rate limiting function
 def custom_rate_limit(key: str, limit: int, period: int) -> bool:
     """
@@ -54,6 +55,7 @@ def custom_rate_limit(key: str, limit: int, period: int) -> bool:
     rate_limits.update_one({"key": key}, {"$inc": {"count": 1}})
     return True
 
+
 # Command Handlers
 async def start(update, context):
     """Handler for /start command."""
@@ -61,6 +63,7 @@ async def start(update, context):
         chat_id=update.effective_chat.id,
         text="Welcome! Use /generateimage <prompt> to create an NFT.",
     )
+
 
 async def generate_image_handler(update, context):
     """Handler for /generateimage command."""
@@ -97,32 +100,42 @@ async def generate_image_handler(update, context):
         logger.error(f"Error generating image: {e}")
         await context.bot.send_message(chat_id=chat_id, text="An error occurred while generating the image.")
 
+
 # Register Handlers
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("generateimage", generate_image_handler))
 
+
 # FastAPI webhook handler
+@app.on_event("startup")
+async def on_startup():
+    """Ensure the Telegram application is initialized."""
+    await application.initialize()
+    await application.start()
+    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOST')}/{TELEGRAM_BOT_TOKEN}"
+    await application.bot.set_webhook(url=webhook_url)
+    logger.info(f"Webhook set to {webhook_url}")
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Cleanly stop the Telegram application."""
+    await application.stop()
+    await application.shutdown()
+
+
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def webhook_handler(request: Request):
     """Handle incoming webhook updates from Telegram."""
-    update = await request.json()
-    user_id = update.get("message", {}).get("from", {}).get("id")
-    if not user_id:
-        logger.error("Missing user ID in the update.")
-        raise HTTPException(status_code=400, detail="Invalid update payload.")
-
-    key = f"user:{user_id}"
-    if not custom_rate_limit(key, limit=1, period=60):
-        logger.warning(f"Rate limit exceeded for user {user_id}")
-        return {"status": "Rate limit exceeded", "code": 429}
-
     try:
+        update = await request.json()
         await application.process_update(update)
     except Exception as e:
         logger.error(f"Error processing update: {e}")
         raise HTTPException(status_code=500, detail="Internal server error.")
 
     return {"status": "OK"}
+
 
 # Main entry point
 if __name__ == "__main__":
