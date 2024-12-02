@@ -1,7 +1,8 @@
 # telegram_bot.py
 
 from flask import Flask, request
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Dispatcher
+from telegram.ext import Updater, CommandHandler, MessageHandler, Dispatcher
+from telegram.ext.filters import Filters  # Updated import for newer versions of python-telegram-bot
 import os
 import requests
 
