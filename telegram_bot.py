@@ -1,7 +1,7 @@
 # telegram_bot.py
 
 import logging
-from flask import Flask, request
+from flask import Flask, request, g
 from telegram.ext import Application, CommandHandler, MessageHandler
 from telegram.ext.filters import TEXT, COMMAND
 import os
@@ -20,7 +20,7 @@ app = Flask(__name__)
 limiter = Limiter(
     app,
     key_func=get_remote_address,
-    default_limits=["1 per minute"]
+    default_limits=["1 per minute"],
 )
 
 # Load environment variables
