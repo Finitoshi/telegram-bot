@@ -1,144 +1,134 @@
-import logging
 import os
-import time
-from typing import Optional
-from fastapi import FastAPI, Request, HTTPException
-from telegram.ext import Application, CommandHandler
-from telegram.ext.filters import COMMAND
+import logging
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from telegram.ext import Application
+import httpx
 from pymongo import MongoClient
-import asyncio
-import aiohttp
-import uvicorn
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+    ],
+)
+logger = logging.getLogger("TelegramBotApp")
 
-# FastAPI app instance
-app = FastAPI()
+# Load environment variables with logging
+def get_env_variable(var_name: str, required: bool = True):
+    value = os.getenv(var_name)
+    if value:
+        logger.info(f"Environment variable '{var_name}' loaded successfully.")
+    elif required:
+        logger.error(f"Environment variable '{var_name}' is required but not set.")
+        raise ValueError(f"Missing required environment variable: {var_name}")
+    else:
+        logger.warning(f"Environment variable '{var_name}' is not set (optional).")
+    return value
 
 # Load environment variables
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
-HUGGINGFACE_SPACE_URL = os.getenv("HUGGINGFACE_SPACE_URL")
+TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
+GROK_API_KEY = get_env_variable('GROK_API_KEY')
+GROK_API_URL = get_env_variable('GROK_API_URL')
+JWK_PATH = get_env_variable('JWK_PATH')
+HUGGINGFACE_API_TOKEN = get_env_variable('HUGGINGFACE_API_TOKEN')
+HUGGINGFACE_SPACE_URL = get_env_variable('HUGGINGFACE_SPACE_URL')
+RENDER_INTERMEDIARY_URL = get_env_variable('RENDER_INTERMEDIARY_URL')
+RENDER_TG_BOT_WEBHOOK_URL = get_env_variable('RENDER_TG_BOT_WEBHOOK_URL')
+MONGO_URI = get_env_variable('MONGO_URI')
 
-if not TELEGRAM_BOT_TOKEN or not MONGO_URI or not HUGGINGFACE_SPACE_URL:
-    raise EnvironmentError("Missing one or more critical environment variables.")
-
-# MongoDB setup
-client = MongoClient(MONGO_URI)
-db = client.rate_limit_db
-rate_limits = db.rate_limits
-
-# Initialize Telegram bot
+# Telegram bot application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-
-# Utility: Rate limiting function
-def custom_rate_limit(key: str, limit: int, period: int) -> bool:
-    """
-    Rate limiter with MongoDB.
-    """
-    now = time.time()
-    record = rate_limits.find_one({"key": key})
-    if not record or record["last_reset"] < now - period:
-        rate_limits.update_one(
-            {"key": key},
-            {"$set": {"count": 1, "last_reset": now}},
-            upsert=True,
-        )
-        return True
-
-    if record["count"] >= limit:
-        return False
-
-    rate_limits.update_one({"key": key}, {"$inc": {"count": 1}})
-    return True
-
-
-# Command Handlers
-async def start(update, context):
-    """Handler for /start command."""
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text="Welcome! Use /generateimage <prompt> to create an NFT.",
-    )
-
-
-async def generate_image_handler(update, context):
-    """Handler for /generateimage command."""
-    chat_id = update.effective_chat.id
-    if not context.args:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="Please provide a prompt. Example: /generateimage cute chibi robot",
-        )
-        return
-
-    prompt = " ".join(context.args)
-    logger.info(f"Generating image for prompt: {prompt}")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{HUGGINGFACE_SPACE_URL}/api/predict/",
-                json={"param_0": prompt},
-            ) as response:
-                if response.status != 200:
-                    raise HTTPException(status_code=response.status, detail="Image generation failed.")
-                result = await response.json()
-
-        image_url = result.get("data", [{}])[0].get("url")
-        if image_url:
-            await context.bot.send_photo(chat_id=chat_id, photo=image_url)
-            logger.info(f"Image sent to user {update.effective_user.id}")
-        else:
-            await context.bot.send_message(chat_id=chat_id, text="Failed to generate image. No URL found.")
-            logger.error("Image generation failed, no URL in response")
-
-    except Exception as e:
-        logger.error(f"Error generating image: {e}")
-        await context.bot.send_message(chat_id=chat_id, text="An error occurred while generating the image.")
-
-
-# Register Handlers
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("generateimage", generate_image_handler))
-
-
-# FastAPI webhook handler
-@app.on_event("startup")
-async def on_startup():
-    """Ensure the Telegram application is initialized."""
+# FastAPI application with detailed lifecycle management
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    logger.info("Initializing Telegram bot application...")
     await application.initialize()
+    logger.info("Telegram application initialized successfully.")
+
+    logger.info("Starting Telegram application...")
     await application.start()
-    webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOST')}/{TELEGRAM_BOT_TOKEN}"
-    await application.bot.set_webhook(url=webhook_url)
-    logger.info(f"Webhook set to {webhook_url}")
+    logger.info("Telegram application started successfully.")
 
-
-@app.on_event("shutdown")
-async def on_shutdown():
-    """Cleanly stop the Telegram application."""
-    await application.stop()
-    await application.shutdown()
-
-
-@app.post(f"/{TELEGRAM_BOT_TOKEN}")
-async def webhook_handler(request: Request):
-    """Handle incoming webhook updates from Telegram."""
+    # Set webhook
+    webhook_url = f"{RENDER_TG_BOT_WEBHOOK_URL}/{TELEGRAM_BOT_TOKEN}"
+    logger.info(f"Attempting to set webhook with URL: {webhook_url}")
     try:
-        update = await request.json()
-        await application.process_update(update)
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info("Webhook set successfully.")
     except Exception as e:
-        logger.error(f"Error processing update: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error.")
+        logger.error(f"Error setting webhook: {e}", exc_info=True)
 
-    return {"status": "OK"}
+    yield  # Application runs here
 
+    # Shutdown logic
+    logger.info("Stopping Telegram application...")
+    await application.stop()
+    logger.info("Telegram application stopped successfully.")
 
-# Main entry point
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    logger.info(f"Starting server on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    logger.info("Shutting down Telegram application...")
+    await application.shutdown()
+    logger.info("Telegram application shutdown complete.")
+
+app = FastAPI(lifespan=lifespan)
+
+# Example route for health check
+@app.get("/")
+async def health_check():
+    logger.info("Health check endpoint accessed.")
+    return {"status": "ok"}
+
+# Example usage of external services with detailed logging
+@app.get("/test-grok")
+async def test_grok():
+    logger.info("Testing Grok API integration...")
+    headers = {"Authorization": f"Bearer {GROK_API_KEY}"}
+    try:
+        response = httpx.post(GROK_API_URL, headers=headers, json={"test": "ping"})
+        response.raise_for_status()
+        logger.info(f"Grok API response: {response.json()}")
+        return response.json()
+    except Exception as e:
+        logger.error(f"Grok API error: {e}", exc_info=True)
+        return {"error": str(e)}
+
+@app.get("/test-huggingface")
+async def test_huggingface():
+    logger.info("Testing HuggingFace API integration...")
+    headers = {"Authorization": f"Bearer {HUGGINGFACE_API_TOKEN}"}
+    try:
+        response = httpx.get(HUGGINGFACE_SPACE_URL, headers=headers)
+        response.raise_for_status()
+        logger.info(f"HuggingFace response: {response.text}")
+        return {"message": "HuggingFace connection successful"}
+    except Exception as e:
+        logger.error(f"HuggingFace API error: {e}", exc_info=True)
+        return {"error": str(e)}
+
+@app.get("/test-mongo")
+async def test_mongo():
+    logger.info("Testing MongoDB connection...")
+    try:
+        client = MongoClient(MONGO_URI)
+        db = client.get_database()
+        logger.info(f"MongoDB connected successfully. Database: {db.name}")
+        return {"message": f"Connected to MongoDB: {db.name}"}
+    except Exception as e:
+        logger.error(f"MongoDB connection error: {e}", exc_info=True)
+        return {"error": str(e)}
+
+# Additional logging for unexpected errors
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger.info(f"Incoming request: {request.method} {request.url}")
+    try:
+        response = await call_next(request)
+        logger.info(f"Response status: {response.status_code} for {request.url}")
+        return response
+    except Exception as e:
+        logger.error(f"Unhandled error during request: {e}", exc_info=True)
+        raise
