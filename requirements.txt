@@ -1,5 +1,5 @@
 # requirements.txt
-flask-limiter==3.1.0
+flask-limiter=3.1.0
 Flask
 python-telegram-bot
 requests
