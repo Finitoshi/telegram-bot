@@ -9,6 +9,7 @@ import requests
 import json
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_limiter.storage import MongoStorage
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -16,10 +17,18 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Rate Limiting Setup
+# MongoDB Atlas connection string
+MONGO_URI = os.getenv('MONGO_URI')
+
+# Rate Limiting Setup with MongoDB
 limiter = Limiter(
-    app=app,
+    app,
     key_func=get_remote_address,
+    storage_uri=MONGO_URI,
+    storage_options={
+        "db_name": "rate_limit_db",  # Name of the database in MongoDB
+        "collection_name": "rate_limits"  # Name of the collection
+    },
     default_limits=["1 per minute"]
 )
 
@@ -75,7 +84,7 @@ def webhook_handler():
     """Handle incoming webhook updates from Telegram"""
     update = request.get_json()
     logger.info(f"Incoming webhook update: {update}")
-    application.process_update(update)  # Process updates synchronously
+    asyncio.run(application.process_update(update))  # Use asyncio.run for async function in sync context
     return "OK"
 
 if __name__ == '__main__':
