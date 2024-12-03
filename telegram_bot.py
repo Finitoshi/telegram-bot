@@ -42,6 +42,7 @@ GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.
 MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
+INTERMEDIARY_URL = get_env_variable('INTERMEDIARY_URL')  # New environment variable for the intermediary service
 
 # Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
 client = MongoClient(MONGO_URI)
@@ -166,6 +167,30 @@ async def query_grok(message):
         logger.exception("Full exception details")
         return "An unexpected error occurred. Chibi's taking a nap, I guess. Zzz..."
 
+# Function to generate a detailed image prompt
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+async def generate_image_prompt(message):
+    # Here's where we make the magic happen with a prompt
+    prompt = f"A comic book style baby robotic pygmy hippo from Japanese manga. The hippo should have big, adorable eyes, a tiny metallic body, and cute robotic accessories like a bow tie or propeller hat. Use clean lines and vibrant colors, with chibi-style exaggeration for extra cuteness. Include sparkles or hearts in the background to enhance the manga feel."
+    
+    # This could be expanded to dynamically adapt based on user's input
+    logger.info(f"Generated image prompt: {prompt}. Hope it's manga-tastic!")
+    return prompt
+
+# Function to send the prompt to the intermediary service
+async def send_prompt_to_intermediary(prompt):
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(INTERMEDIARY_URL, json={"prompt": prompt})
+            response.raise_for_status()
+            return True, response.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Failed to send prompt to intermediary: HTTP error {e.response.status_code}")
+        return False, None
+    except Exception as e:
+        logger.error(f"Unexpected error sending prompt to intermediary: {e}")
+        return False, None
+
 # Step 9: Token gating - let's make sure only the cool cats get in
 async def check_token_ownership(wallet_address):
     try:
@@ -250,8 +275,20 @@ async def handle_webhook(request: Request):
 
         # Check if user has been verified before processing further messages
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
-            chibi_response = await query_grok(message)
-            await application.bot.send_message(chat_id=chat_id, text=chibi_response)
+            if "image" in message.lower() or "comic" in message.lower():  # Assuming this indicates an image request
+                prompt = await generate_image_prompt(message)
+                await application.bot.send_message(chat_id=chat_id, text="Generating a detailed prompt for your image request. Get ready for some manga magic!")
+                
+                # Send the prompt to the intermediary service
+                success, response = await send_prompt_to_intermediary(prompt)
+                if success:
+                    await application.bot.send_message(chat_id=chat_id, text=f"Prompt sent to my buddy! Please wait a minute while it processes... Now playing the waiting game.")
+                else:
+                    await application.bot.send_message(chat_id=chat_id, text="Oops! Failed to send the prompt. Try again later. #TechProblems")
+            else:
+                # For text-based queries, use the original query_grok function
+                chibi_response = await query_grok(message)
+                await application.bot.send_message(chat_id=chat_id, text=chibi_response)
         else:
             await application.bot.send_message(chat_id=chat_id, text="Please verify your wallet to continue. No freeloaders here!")
 
