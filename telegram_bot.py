@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import random
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 from telegram import Update
@@ -167,16 +168,24 @@ async def query_grok(message):
         logger.exception("Full exception details")
         return "An unexpected error occurred. Chibi's taking a nap, I guess. Zzz..."
 
+# Step 9: Image Generation - Let's make some cute robo-hippos!
+
+# Define the fixed prompt with placeholders for rarity
+BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
+
+# Define the accessories and rarities
+RARITY_LEVELS = {
+    'common': ['a bow tie', 'a scarf'],
+    'uncommon': ['a propeller hat', 'tiny wings'],
+    'rare': ['a mini jetpack', 'a magic wand']
+}
+
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait
-async def generate_image_prompt(message):
-    """
-    Generate a detailed prompt for an image based on the user's request. 
-    Here we're just creating a static prompt for demonstration, but this should be dynamic based on the message.
-    """
-    prompt = f"A comic book style baby robotic pygmy hippo from Japanese manga. The hippo should have big, adorable eyes, a tiny metallic body, and cute robotic accessories like a bow tie or propeller hat. Use clean lines and vibrant colors, with chibi-style exaggeration for extra cuteness. Include sparkles or hearts in the background to enhance the manga feel."
-    
-    # Here you can adjust the prompt generation logic or make it more dynamic based on user input
-    
+def generate_image_prompt():
+    rarity = random.choice(list(RARITY_LEVELS.keys()))
+    accessory = random.choice(RARITY_LEVELS[rarity])
+    prompt = BASE_PROMPT.format(accessory=accessory, rarity=rarity)
+    logger.info(f"Generated image prompt: {prompt}. Let's see if we can whip up a rare robo-hippo!")
     return prompt
 
 async def send_prompt_to_intermediary(prompt):
@@ -195,7 +204,7 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}")
         return False, None
 
-# Step 9: Token gating - let's make sure only the cool cats get in
+# Step 10: Token gating - let's make sure only the cool cats get in
 async def check_token_ownership(wallet_address):
     try:
         solana_client = Client(SOLANA_RPC_URL)
@@ -228,7 +237,7 @@ async def verify_signature(wallet_address, message, signature):
         logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
         return False
 
-# Step 10: Webhook handler for Telegram updates - where the magic happens
+# Step 11: Webhook handler for Telegram updates - where the magic happens
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def handle_webhook(request: Request):
     update = await request.json()
@@ -279,16 +288,16 @@ async def handle_webhook(request: Request):
 
         # Check if user has been verified before processing further messages
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
-            if "image" in message.lower() or "comic" in message.lower():  # Assuming this indicates an image request
-                prompt = await generate_image_prompt(message)
-                await application.bot.send_message(chat_id=chat_id, text="Generating a detailed prompt for your image request...")
-
+            if message.lower().startswith("/generate_image"):
+                prompt = generate_image_prompt()
+                await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
+                
                 # Send the prompt to the intermediary service
                 success, response = await send_prompt_to_intermediary(prompt)
                 if success:
-                    await application.bot.send_message(chat_id=chat_id, text=f"Prompt sent to my buddy! Please wait a minute while it processes...")
+                    await application.bot.send_message(chat_id=chat_id, text="Image generation request sent. Check back for your image!")
                 else:
-                    await application.bot.send_message(chat_id=chat_id, text="Oops! Failed to send the prompt. Try again later.")
+                    await application.bot.send_message(chat_id=chat_id, text="Failed to send image generation request. Try again later.")
             else:
                 # For text-based queries, use the original query_grok function
                 chibi_response = await query_grok(message)
@@ -298,7 +307,7 @@ async def handle_webhook(request: Request):
 
     return {"status": "ok"}
 
-# Step 11: Middleware to log requests and responses - because we like to keep track of everything
+# Step 12: Middleware to log requests and responses - because we like to keep track of everything
 @app.middleware("http")
 async def log_requests(request, call_next):
     logger.info(f"Incoming request: {request.method} {request.url}. What's up, internet?")
@@ -310,7 +319,7 @@ async def log_requests(request, call_next):
         logger.error(f"Unhandled error during request: {e}. This is why we can't have nice things!")
         raise
 
-# Step 12: Ensure the application listens on the correct port - because we need to be heard
+# Step 13: Ensure the application listens on the correct port - because we need to be heard
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set, 'cause we're flexible like that
