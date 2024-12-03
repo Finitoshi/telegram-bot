@@ -65,7 +65,7 @@ def generate_nonce(user_id):
         {"$set": {"nonce": nonce, "expiry": expiry}}, 
         upsert=True
     )
-    logger.info(f"Generated nonce for user {user_id}. Expires at {expiry}. Don't be late!")
+    logger.info(f"Generated nonce for user {user_id}. Expires at {expiry}. Don't be late, or it's back to square one!")
     return nonce
 
 def get_nonce(user_id):
@@ -74,7 +74,7 @@ def get_nonce(user_id):
         return nonce_data['nonce']
     else:
         nonce_collection.delete_one({"user_id": user_id})
-        logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam.")
+        logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
         return None
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
@@ -103,7 +103,7 @@ async def health_check():
     return {"status": "ok"}
 
 # Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because persistence is key
 async def query_grok(message):
     cached_response = cache_collection.find_one({
         "message": message,
@@ -180,7 +180,7 @@ RARITY_LEVELS = {
     'rare': ['a mini jetpack', 'a magic wand']
 }
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because creativity doesn't come easy
 def generate_image_prompt():
     rarity = random.choice(list(RARITY_LEVELS.keys()))
     accessory = random.choice(RARITY_LEVELS[rarity])
@@ -198,10 +198,10 @@ async def send_prompt_to_intermediary(prompt):
             response.raise_for_status()
             return True, response.json()
     except httpx.HTTPStatusError as e:
-        logger.error(f"Failed to send prompt to intermediary: HTTP error {e.response.status_code}")
+        logger.error(f"Failed to send prompt to intermediary: HTTP error {e.response.status_code}. Did the robo-hippo escape?")
         return False, None
     except Exception as e:
-        logger.error(f"Unexpected error sending prompt to intermediary: {e}")
+        logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
 # Step 10: Token gating - let's make sure only the cool cats get in
