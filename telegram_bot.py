@@ -1,3 +1,5 @@
+# Filename: main.py
+
 import os
 import logging
 import asyncio
@@ -97,10 +99,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Step 7: Health check route - just to make sure we're not dead yet
-@app.get("/")
+@app.get("/health")
 async def health_check():
-    logger.info("Health check endpoint accessed. Still alive, yo.")
-    return {"status": "ok"}
+    logger.info("Health check endpoint accessed. We're still kicking!")
+    return {"status": "OK"}
 
 # Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because persistence is key
