@@ -1,310 +1,66 @@
-"""
-File: telegram_bot.py
-Welcome back to the Chibi Bot world, where we're reverting to the old-school Telegram webhook style. Just like the good ol' days, but with more swag.
-"""
-
-import os
-import random
-import logging
-import asyncio
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-import httpx
-from pymongo import MongoClient
-import json
-from datetime import datetime, timedelta
-from tenacity import retry, stop_after_attempt, wait_fixed
-from solana.publickey import PublicKey
-from solana.rpc.api import Client
-from solana.transaction import Transaction, Message
-
-# Step 1: Async logging because we're still too cool for sync logging
-class AsyncLogger(logging.Logger):
-    def __init__(self, name):
-        super().__init__(name)
-        self._queue = asyncio.Queue()
-
-    async def _async_log(self, level, msg, *args, **kwargs):
-        # Queue up logs to avoid blocking the main thread, because we're all about that async life
-        self._queue.put_nowait((level, msg, args, kwargs))
-        while not self._queue.empty():
-            level, msg, args, kwargs = await self._queue.get()
-            super().log(level, msg, *args, **kwargs)
-            self._queue.task_done()
-
-    async def ainfo(self, msg, *args, **kwargs):
-        await self._async_log(logging.INFO, msg, *args, **kwargs)
-
-    async def aerror(self, msg, *args, **kwargs):
-        await self._async_log(logging.ERROR, msg, *args, **kwargs)
-
-    async def awarning(self, msg, *args, **kwargs):
-        await self._async_log(logging.WARNING, msg, *args, **kwargs)
-
-logging.setLoggerClass(AsyncLogger)
-logger = logging.getLogger("ChibiBot")
-logger.setLevel(logging.INFO)
-
-# Step 2: Loading environment vars - because secrets should stay secret, fam
-def get_env_variable(var_name: str, required: bool = True):
-    value = os.getenv(var_name)
-    if value:
-        logger.info(f"Environment variable '{var_name}' loaded successfully. Yeet!")
-    elif required:
-        logger.error(f"Environment variable '{var_name}' is required but not set. Big oof!")
-        raise ValueError(f"Missing required environment variable: {var_name}")
-    else:
-        logger.warning(f"Environment variable '{var_name}' is not set (optional). Meh.")
-    return value
-
-# Step 3: Here's where we load all the secret sauce (environment variables)
-TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
-GROK_API_KEY = get_env_variable('GROK_API_KEY')
-GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
-MONGO_URI = get_env_variable('MONGO_URI')
-BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')
-SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"
-INTERMEDIARY_URL = get_env_variable('INTERMEDIARY_URL')
-
-# Step 4: MongoDB setup - where we store all the chill vibes and important data
-client = MongoClient(MONGO_URI)
-db = client['bot_db']
-cache_collection = db['cache']
-nonce_collection = db['nonces']
-
-# Nonce expiry time - because we don't like stale snacks
-NONCE_EXPIRY = timedelta(minutes=5)
-
-def generate_nonce(user_id):
-    nonce = os.urandom(32).hex()  # Generate 32 bytes of random data, then convert to hex because hex is where it's at
-    expiry = datetime.utcnow() + NONCE_EXPIRY
-    nonce_collection.update_one(
-        {"user_id": user_id}, 
-        {"$set": {"nonce": nonce, "expiry": expiry}}, 
-        upsert=True
-    )
-    logger.info(f"Generated nonce for user {user_id}. Expires at {expiry}. Don't be late, or it's back to square one!")
-    return nonce
-
-def get_nonce(user_id):
-    nonce_data = nonce_collection.find_one({"user_id": user_id})
-    if nonce_data and nonce_data['expiry'] > datetime.utcnow():
-        return nonce_data['nonce']
-    else:
-        nonce_collection.delete_one({"user_id": user_id})
-        logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
-        return None
-
-# Step 5: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because persistence is key
-async def query_grok(message):
-    cached_response = cache_collection.find_one({
-        "message": message,
-        "persona": "Chibi",  # Cache key now includes persona for that personalized touch
-        "cached_at": {"$gte": datetime.utcnow() - timedelta(seconds=60)}
-    })
-
-    if cached_response:
-        logger.info("Returning cached response from Chibi. We're all about that low-latency life.")
-        return cached_response['response']
-
-    headers = {
-        "Authorization": f"Bearer {GROK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are Chibi, a new advanced AI bot. You're vibrant, witty, and highly advanced. Your responses should be infused with a playful, youthful energy, often using slang and modern internet culture references. You're here to help with a cool, tech-savvy attitude, but never forgetting your mission to assist and inform."
-            },
-            {"role": "user", "content": message}
-        ],
-        "model": "grok-beta",
-        "stream": False,
-        "temperature": 0.7  # Increased for more creative, Chibi-like responses
-    }
-    logger.info(f"Sending to Grok API as Chibi: {payload}. Let's see if Chibi's feeling chatty today.")
-    
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:  # Give Chibi a full minute to respond, patience is key
-            response = await client.post(GROK_API_URL, headers=headers, json=payload)
-            logger.info(f"Received response from Grok API as Chibi: Status code {response.status_code}")
-            logger.debug(f"Response content: {response.text}")
-            
-            response.raise_for_status()  # This will raise an error for HTTP errors
-            response_data = response.json()
-            logger.info(f"Grok API response as Chibi: {response_data}")
-            
-            # Extract response from Grok API
-            chibi_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', "Chibi didn't respond properly. Guess AI has its off days too.")
-            
-            # Cache the response with persona
-            cache_data = {
-                "message": message,
-                "persona": "Chibi",
-                "response": chibi_response,
-                "cached_at": datetime.utcnow()
-            }
-            cache_collection.insert_one(cache_data)
-            return chibi_response
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Grok API HTTP error while asking as Chibi: Status code {e.response.status_code}, Response: {e.response.text}. That's not very Chibi of you!")
-        return "An error occurred while querying Chibi. #AIOops"
-    except httpx.RequestError:
-        logger.error("Grok API request error. Chibi's internet must be acting up.")
-        return "Chibi's internet is on the fritz. Try again later, fam!"
-    except Exception as e:
-        logger.error(f"Unexpected error with Grok API while asking as Chibi: {e}. Chibi's gone rogue!")
-        return "An unexpected error occurred. Chibi's taking a nap, I guess. Zzz..."
-
-# Step 6: Image Generation - Let's make some cute robo-hippos!
-BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
-
-RARITY_LEVELS = {
-    'common': ['a bow tie', 'a scarf'],
-    'uncommon': ['a propeller hat', 'tiny wings'],
-    'rare': ['a mini jetpack', 'a magic wand']
-}
-
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because creativity doesn't come easy
-def generate_image_prompt():
-    rarity = random.choice(list(RARITY_LEVELS.keys()))
-    accessory = random.choice(RARITY_LEVELS[rarity])
-    prompt = BASE_PROMPT.format(accessory=accessory, rarity=rarity)
-    logger.info(f"Generated image prompt: {prompt}. Let's see if we can whip up a rare robo-hippo!")
-    return prompt
-
-async def send_prompt_to_intermediary(prompt):
-    """
-    Send the image generation prompt to an intermediary service for processing.
-    """
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(INTERMEDIARY_URL, json={"prompt": prompt})
-            response.raise_for_status()
-            return True, response.json()
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Failed to send prompt to intermediary: HTTP error {e.response.status_code}. Did the robo-hippo escape?")
-        return False, None
-    except Exception as e:
-        logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
-        return False, None
-
-# Step 7: Token gating - let's make sure only the cool cats get in
-async def check_token_ownership(wallet_address):
-    try:
-        solana_client = Client(SOLANA_RPC_URL)
-        user_wallet = PublicKey(wallet_address)
-        token_balance = solana_client.get_token_account_balance(user_wallet, BITTY_TOKEN_ADDRESS)
-
-        if token_balance and token_balance['result']['amount'] is not None:
-            return int(token_balance['result']['amount']) > 0
-        else:
-            logger.warning(f"No token balance found for user {wallet_address} or token address {BITTY_TOKEN_ADDRESS}. Time to check your wallet, bro.")
-            return False
-    except Exception as e:
-        logger.error(f"Error checking token ownership for user {wallet_address}: {e}. The blockchain gods are not pleased today.")
-        return False
-
-# Secure Signature Verification
-async def verify_signature(wallet_address, message, signature):
-    try:
-        # Convert hex strings to bytes
-        message_bytes = bytes.fromhex(message)
-        signature_bytes = bytes.fromhex(signature)
-        
-        # Create a mock transaction for verification
-        mock_transaction = Transaction().add(Message.new([PublicKey(wallet_address)], nonce=message_bytes))
-        if mock_transaction.verify_signature(PublicKey(wallet_address), signature_bytes):
-            return True
-        else:
-            return False
-    except Exception as e:
-        logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
-        return False
-
-# Step 8: The main event - handling Telegram updates with webhook
-async def handle_update(update: Update, context):
-    if update.message and update.message.text:
-        message = update.message.text
-        chat_id = update.message.chat_id
-        
-        if message.lower().startswith("/connect"):
-            parts = message.split()
-            if len(parts) > 1:
-                wallet_address = parts[1]
-                try:
-                    PublicKey(wallet_address)  # This will raise an error if not a valid Solana address
-                    nonce = generate_nonce(chat_id)
-                    await context.bot.send_message(chat_id=chat_id, text=f"Please sign this nonce with your wallet: {nonce}. Then, send it back with /sign <your_signature>")
-                except ValueError:
-                    await context.bot.send_message(chat_id=chat_id, text="Invalid wallet address. Looks like you're trying to hack the mainframe. Try again with /connect <your_wallet_address>")
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="Please provide your Solana wallet address with /connect <your_wallet_address>. Don't be shy, we don't bite... much.")
-
-        elif message.lower().startswith("/sign"):
-            parts = message.split()
-            if len(parts) > 1:
-                signature = parts[1]
-                expected_nonce = get_nonce(chat_id)
-                if expected_nonce:
-                    is_verified = await verify_signature(wallet_address, expected_nonce, signature)
-                    if is_verified:
-                        has_token = await check_token_ownership(wallet_address)
-                        if has_token:
-                            await context.bot.send_message(chat_id=chat_id, text="Wallet verified and token balance confirmed. Welcome to the club, fam!")
-                            nonce_collection.delete_one({"user_id": chat_id})  # Clear nonce after successful verification
-                        else:
-                            await context.bot.send_message(chat_id=chat_id, text="You don't hold enough BITTY tokens to access this bot. Time to hit the crypto gym.")
-                    else:
-                        await context.bot.send_message(chat_id=chat_id, text="Signature verification failed. Did you try to cheat on the test?")
-                else:
-                    await context.bot.send_message(chat_id=chat_id, text="Your nonce has expired or is invalid. Please start with /connect again.")
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="Please provide the signature with /sign <signature>. Don't make me wait!")
-
-        elif get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
-            if message.lower().startswith("/generate_image"):
-                prompt = generate_image_prompt()
-                await context.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                
-                # Send the prompt to the intermediary service
-                success, response = await send_prompt_to_intermediary(prompt)
-                if success:
-                    await context.bot.send_message(chat_id=chat_id, text="Image generation request sent. Check back for your image!")
-                else:
-                    await context.bot.send_message(chat_id=chat_id, text="Failed to send image generation request. Try again later.")
-            else:
-                # For text-based queries, use the original query_grok function
-                chibi_response = await query_grok(message)
-                await context.bot.send_message(chat_id=chat_id, text=chibi_response)
-        else:
-            await context.bot.send_message(chat_id=chat_id, text="Please verify your wallet to continue. No freeloaders here!")
-
-# Step 9: Main function to set up the bot with webhook
-async def main():
-    # Initialize the Telegram bot application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    # Add handlers for commands and messages
-    application.add_handler(CommandHandler("connect", handle_update))
-    application.add_handler(CommandHandler("sign", handle_update))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_update))
-
-    # Set webhook
-    webhook_url = os.getenv("WEBHOOK_URL")  # Ensure this environment variable is set with your server's URL
-    await application.bot.set_webhook(url=webhook_url)
-
-    logger.info("Webhook set. Chibi is now listening for updates. Let's get this party started!")
-
-    # Instead of using run_polling(), we'll use run_webhook for webhook setup
-    await application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.getenv("PORT", 8000))
-    )
-
-if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
+> Running 'python telegram_bot.py'
+Traceback (most recent call last):
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 881, in __run
+    raise exc
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 873, in __run
+    loop.run_until_complete(updater_coroutine)  # one of updater.start_webhook/polling
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/nest_asyncio.py", line 90, in run_until_complete
+    return f.result()
+           ^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/futures.py", line 203, in result
+    raise self._exception.with_traceback(self._exception_tb)
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 277, in __step
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_updater.py", line 458, in start_webhook
+    raise RuntimeError(
+RuntimeError: To use `start_webhook`, PTB must be installed via `pip install python-telegram-bot[webhooks]`.
+During handling of the above exception, another exception occurred:
+Traceback (most recent call last):
+  File "/opt/render/project/src/telegram_bot.py", line 310, in <module>
     asyncio.run(main())
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/nest_asyncio.py", line 35, in run
+    return loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/nest_asyncio.py", line 90, in run_until_complete
+    return f.result()
+           ^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/futures.py", line 203, in result
+    raise self._exception.with_traceback(self._exception_tb)
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 277, in __step
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/telegram_bot.py", line 302, in main
+    await application.run_webhook(
+          ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 820, in run_webhook
+    return self.__run(
+           ^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 895, in __run
+    loop.close()
+  File "/usr/local/lib/python3.11/asyncio/unix_events.py", line 68, in close
+    super().close()
+  File "/usr/local/lib/python3.11/asyncio/selector_events.py", line 88, in close
+    raise RuntimeError("Cannot close a running event loop")
+RuntimeError: Cannot close a running event loop
+==> Exited with status 1
+==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+==> Running 'python telegram_bot.py'
+Traceback (most recent call last):
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 881, in __run
+    raise exc
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_application.py", line 873, in __run
+    loop.run_until_complete(updater_coroutine)  # one of updater.start_webhook/polling
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/nest_asyncio.py", line 90, in run_until_complete
+    return f.result()
+           ^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/futures.py", line 203, in result
+    raise self._exception.with_traceback(self._exception_tb)
+  File "/usr/local/lib/python3.11/asyncio/tasks.py", line 277, in __step
+    result = coro.send(None)
+             ^^^^^^^^^^^^^^^
+  File "/opt/render/project/src/.venv/lib/python3.11/site-packages/telegram/ext/_updater.py", line 458, in start_webhook
+    raise RuntimeError(
+RuntimeError: To use `start_webhook`, PTB must be installed via `pip install python-telegram-bot[webhooks]`.
