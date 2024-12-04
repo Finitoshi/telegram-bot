@@ -298,8 +298,13 @@ async def main():
 
     logger.info("Webhook set. Chibi is now listening for updates. Let's get this party started!")
 
-    # Run the bot until you press Ctrl-C or the process receives SIGINT, SIGTERM or SIGABRT
-    await application.run_polling()
+    # Instead of using run_polling(), we'll use run_webhook for webhook setup
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.getenv("PORT", 8000))
+    )
 
 if __name__ == "__main__":
+    import nest_asyncio
+    nest_asyncio.apply()
     asyncio.run(main())
