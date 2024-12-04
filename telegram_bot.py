@@ -45,7 +45,7 @@ class AsyncLogger(logging.Logger):
     async def awarning(self, msg, *args, **kwargs):
         await self._async_log(logging.WARNING, msg, *args, **kwargs)
 
-logging.set_logger_class(AsyncLogger)
+logging.setLoggerClass(AsyncLogger)
 logger = logging.getLogger("ChibiBot")
 logger.setLevel(logging.INFO)
 
