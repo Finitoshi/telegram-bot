@@ -100,7 +100,7 @@ def get_nonce(user_id):
         logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
         return None
 
-# Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
+# Step 6: FastAPI application with detailed lifecycle management
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the lifecycle of our app, because everything needs a start and an end."""
@@ -125,14 +125,14 @@ class MessageModel(BaseModel):
     message: str
     persona: Optional[str] = "Chibi"
 
-# Step 7: Health check route - just to make sure we're not dead yet
+# Step 7: Health check route
 @app.get("/health")
 async def health_check():
     """Check if the bot's alive or if it's time to call the ghostbusters."""
     logger.info("Health check endpoint accessed. We're still kicking!")
     return {"status": "OK"}
 
-# Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
+# Step 8: Query Grok API and cache the response
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def query_grok(message, persona="Chibi"):
     """Ask Grok the wise about life, the universe, and everything, with a touch of Chibi fun."""
@@ -199,7 +199,7 @@ async def query_grok(message, persona="Chibi"):
         logger.exception("Full exception details")
         return f"An unexpected error occurred. {persona}'s taking a nap, I guess. Zzz..."
 
-# Step 9: Image Generation - Let's make some cute robo-hippos!
+# Step 9: Image Generation
 
 # Define the fixed prompt with placeholders for rarity
 BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
@@ -240,7 +240,7 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
-# Step 10: Token gating - let's make sure only the cool cats get in
+# Step 10: Token gating
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def check_token_ownership(wallet_address):
     """Check if someone's got enough of those sweet, sweet tokens."""
@@ -277,7 +277,7 @@ async def verify_signature(wallet_address, message, signature):
         logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
         return False
 
-# Step 11: Webhook handler for Telegram updates - where the magic happens
+# Step 11: Webhook handler for Telegram updates
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def handle_webhook(request: Request):
     """Handle incoming Telegram messages because we need to keep the conversation flowing."""
@@ -353,7 +353,7 @@ async def handle_webhook(request: Request):
 
     return {"status": "ok"}
 
-# Middleware for logging requests and responses - because we like to keep track of everything
+# Middleware for logging requests and responses
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         logger.info(f"Incoming request: {request.method} {request.url}. What's up, internet?")
@@ -376,8 +376,8 @@ async def validation_exception_handler(request, exc):
         content={"detail": exc.errors(), "body": exc.body},
     )
 
-# Step 13: Ensure the application listens on the correct port - because we need to be heard
+# Step 13: Ensure the application listens on the correct port
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set, 'cause we're flexible like that
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
     uvicorn.run(app, host="0.0.0.0", port=port)
