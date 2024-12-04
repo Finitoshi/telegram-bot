@@ -1,28 +1,24 @@
 """
 File: telegram_bot.py
-Welcome to the Chibi Bot world, where we mix tech with a bit of chill. This file is your gateway to understanding how Chibi vibes with Telegram!
+Welcome back to the Chibi Bot world, where we're reverting to the old-school Telegram webhook style. Just like the good ol' days, but with more swag.
 """
 
 import os
 import random
 import logging
 import asyncio
-from typing import Dict, List
-from fastapi import FastAPI, Request, HTTPException
-from contextlib import asynccontextmanager
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import httpx
 from pymongo import MongoClient
 import json
 from datetime import datetime, timedelta
-from tenacity import retry, stop_after_attempt, wait_fixed, before_log, after_log
+from tenacity import retry, stop_after_attempt, wait_fixed
 from solana.publickey import PublicKey
 from solana.rpc.api import Client
 from solana.transaction import Transaction, Message
-from cryptography.fernet import Fernet
 
-# Step 1: Async logging because we're too cool for sync logging in 2024
+# Step 1: Async logging because we're still too cool for sync logging
 class AsyncLogger(logging.Logger):
     def __init__(self, name):
         super().__init__(name)
@@ -76,9 +72,6 @@ db = client['bot_db']
 cache_collection = db['cache']
 nonce_collection = db['nonces']
 
-# Step 5: Initialize Telegram bot application - let's get this party started
-application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
 # Nonce expiry time - because we don't like stale snacks
 NONCE_EXPIRY = timedelta(minutes=5)
 
@@ -102,32 +95,7 @@ def get_nonce(user_id):
         logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
         return None
 
-# Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Initializing Telegram bot application... 🔥")
-    await application.initialize()
-    logger.info("Telegram application initialized, all set to go! 🚀")
-    logger.info("Starting the Telegram bot application... 🚀")
-    await application.start()  # Bot's ready to start flexing
-    logger.info("Telegram bot started, we are live! 🔥")
-    yield
-    logger.info("Stopping Telegram bot application... 🚨")
-    await application.stop()
-    logger.info("Telegram bot stopped successfully. 🛑")
-    logger.info("Shutting down Telegram bot application... 💤")
-    await application.shutdown()
-    logger.info("Telegram bot shutdown complete. ✅")
-
-app = FastAPI(lifespan=lifespan)
-
-# Step 7: Health check route - just to make sure we're not dead yet
-@app.get("/")
-async def health_check():
-    logger.info("Health check endpoint accessed. Still alive, yo.")
-    return {"status": "ok"}
-
-# Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
+# Step 5: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))  # Retry 3 times with 2-second wait, because persistence is key
 async def query_grok(message):
     cached_response = cache_collection.find_one({
@@ -182,20 +150,17 @@ async def query_grok(message):
             return chibi_response
     except httpx.HTTPStatusError as e:
         logger.error(f"Grok API HTTP error while asking as Chibi: Status code {e.response.status_code}, Response: {e.response.text}. That's not very Chibi of you!")
-        raise HTTPException(status_code=e.response.status_code, detail="An error occurred while querying Chibi. #AIOops")
-    except httpx.RequestError as e:
-        logger.error(f"Grok API request error: {e}. Chibi's internet must be acting up.")
-        raise HTTPException(status_code=500, detail="Chibi's internet is on the fritz. Try again later, fam!")
+        return "An error occurred while querying Chibi. #AIOops"
+    except httpx.RequestError:
+        logger.error("Grok API request error. Chibi's internet must be acting up.")
+        return "Chibi's internet is on the fritz. Try again later, fam!"
     except Exception as e:
         logger.error(f"Unexpected error with Grok API while asking as Chibi: {e}. Chibi's gone rogue!")
-        raise HTTPException(status_code=500, detail="An unexpected error occurred. Chibi's taking a nap, I guess. Zzz...")
+        return "An unexpected error occurred. Chibi's taking a nap, I guess. Zzz..."
 
-# Step 9: Image Generation - Let's make some cute robo-hippos!
-
-# Define the fixed prompt with placeholders for rarity
+# Step 6: Image Generation - Let's make some cute robo-hippos!
 BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
 
-# Define the accessories and rarities
 RARITY_LEVELS = {
     'common': ['a bow tie', 'a scarf'],
     'uncommon': ['a propeller hat', 'tiny wings'],
@@ -226,7 +191,7 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
-# Step 10: Token gating - let's make sure only the cool cats get in
+# Step 7: Token gating - let's make sure only the cool cats get in
 async def check_token_ownership(wallet_address):
     try:
         solana_client = Client(SOLANA_RPC_URL)
@@ -259,33 +224,26 @@ async def verify_signature(wallet_address, message, signature):
         logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
         return False
 
-# Step 11: Webhook handler for Telegram updates - where the magic happens
-@app.post(f"/webhook/{TELEGRAM_BOT_TOKEN}")
-async def handle_webhook(request: Request):
-    update = await request.json()
-    logger.info(f"Received update: {json.dumps(update, indent=2)}")  # Log the entire received update
-    telegram_update = Update.de_json(update, application.bot)
-    
-    if telegram_update.message and telegram_update.message.text:
-        message = telegram_update.message.text
-        chat_id = telegram_update.message.chat_id
+# Step 8: The main event - handling Telegram updates with webhook
+async def handle_update(update: Update, context):
+    if update.message and update.message.text:
+        message = update.message.text
+        chat_id = update.message.chat_id
         
         if message.lower().startswith("/connect"):
             parts = message.split()
             if len(parts) > 1:
                 wallet_address = parts[1]
-                
                 try:
                     PublicKey(wallet_address)  # This will raise an error if not a valid Solana address
                     nonce = generate_nonce(chat_id)
-                    await application.bot.send_message(chat_id=chat_id, text=f"Please sign this nonce with your wallet: {nonce}. Then, send it back with /sign <your_signature>")
+                    await context.bot.send_message(chat_id=chat_id, text=f"Please sign this nonce with your wallet: {nonce}. Then, send it back with /sign <your_signature>")
                 except ValueError:
-                    await application.bot.send_message(chat_id=chat_id, text="Invalid wallet address. Looks like you're trying to hack the mainframe. Try again with /connect <your_wallet_address>")
+                    await context.bot.send_message(chat_id=chat_id, text="Invalid wallet address. Looks like you're trying to hack the mainframe. Try again with /connect <your_wallet_address>")
             else:
-                await application.bot.send_message(chat_id=chat_id, text="Please provide your Solana wallet address with /connect <your_wallet_address>. Don't be shy, we don't bite... much.")
-            return {"status": "ok"}
+                await context.bot.send_message(chat_id=chat_id, text="Please provide your Solana wallet address with /connect <your_wallet_address>. Don't be shy, we don't bite... much.")
 
-        if message.lower().startswith("/sign"):
+        elif message.lower().startswith("/sign"):
             parts = message.split()
             if len(parts) > 1:
                 signature = parts[1]
@@ -295,54 +253,53 @@ async def handle_webhook(request: Request):
                     if is_verified:
                         has_token = await check_token_ownership(wallet_address)
                         if has_token:
-                            await application.bot.send_message(chat_id=chat_id, text="Wallet verified and token balance confirmed. Welcome to the club, fam!")
-                            # User is now verified for future interactions
+                            await context.bot.send_message(chat_id=chat_id, text="Wallet verified and token balance confirmed. Welcome to the club, fam!")
                             nonce_collection.delete_one({"user_id": chat_id})  # Clear nonce after successful verification
                         else:
-                            await application.bot.send_message(chat_id=chat_id, text="You don't hold enough BITTY tokens to access this bot. Time to hit the crypto gym.")
+                            await context.bot.send_message(chat_id=chat_id, text="You don't hold enough BITTY tokens to access this bot. Time to hit the crypto gym.")
                     else:
-                        await application.bot.send_message(chat_id=chat_id, text="Signature verification failed. Did you try to cheat on the test?")
+                        await context.bot.send_message(chat_id=chat_id, text="Signature verification failed. Did you try to cheat on the test?")
                 else:
-                    await application.bot.send_message(chat_id=chat_id, text="Your nonce has expired or is invalid. Please start with /connect again.")
+                    await context.bot.send_message(chat_id=chat_id, text="Your nonce has expired or is invalid. Please start with /connect again.")
             else:
-                await application.bot.send_message(chat_id=chat_id, text="Please provide the signature with /sign <signature>. Don't make me wait!")
-            return {"status": "ok"}
+                await context.bot.send_message(chat_id=chat_id, text="Please provide the signature with /sign <signature>. Don't make me wait!")
 
-        # Check if user has been verified before processing further messages
-        if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
+        elif get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
             if message.lower().startswith("/generate_image"):
                 prompt = generate_image_prompt()
-                await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-
+                await context.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
+                
                 # Send the prompt to the intermediary service
                 success, response = await send_prompt_to_intermediary(prompt)
                 if success:
-                    await application.bot.send_message(chat_id=chat_id, text="Image generation request sent. Check back for your image!")
+                    await context.bot.send_message(chat_id=chat_id, text="Image generation request sent. Check back for your image!")
                 else:
-                    await application.bot.send_message(chat_id=chat_id, text="Failed to send image generation request. Try again later.")
+                    await context.bot.send_message(chat_id=chat_id, text="Failed to send image generation request. Try again later.")
             else:
                 # For text-based queries, use the original query_grok function
                 chibi_response = await query_grok(message)
-                await application.bot.send_message(chat_id=chat_id, text=chibi_response)
+                await context.bot.send_message(chat_id=chat_id, text=chibi_response)
         else:
-            await application.bot.send_message(chat_id=chat_id, text="Please verify your wallet to continue. No freeloaders here!")
+            await context.bot.send_message(chat_id=chat_id, text="Please verify your wallet to continue. No freeloaders here!")
 
-    return {"status": "ok"}
+# Step 9: Main function to set up the bot with webhook
+async def main():
+    # Initialize the Telegram bot application
+    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Step 12: Middleware to log requests and responses - because we like to keep track of everything
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    logger.info(f"Incoming request: {request.method} {request.url}. What's up, internet?")
-    try:
-        response = await call_next(request)
-        logger.info(f"Response status: {response.status_code} for {request.url}. Peace out!")
-        return response
-    except Exception as e:
-        logger.error(f"Unhandled error during request: {e}. This is why we can't have nice things!")
-        raise
+    # Add handlers for commands and messages
+    application.add_handler(CommandHandler("connect", handle_update))
+    application.add_handler(CommandHandler("sign", handle_update))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_update))
 
-# Step 13: Ensure the application listens on the correct port - because we need to be heard
+    # Set webhook
+    webhook_url = os.getenv("WEBHOOK_URL")  # Ensure this environment variable is set with your server's URL
+    await application.bot.set_webhook(url=webhook_url)
+
+    logger.info("Webhook set. Chibi is now listening for updates. Let's get this party started!")
+
+    # Run the bot until you press Ctrl-C or the process receives SIGINT, SIGTERM or SIGABRT
+    await application.run_polling()
+
 if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set, 'cause we're flexible like that
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    asyncio.run(main())
