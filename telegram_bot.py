@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import urlparse
 
-# Step 1: Configure logging - because if you're not logging, are you even coding?
+# Step 1: Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -33,10 +33,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TelegramBotApp")
 
-# Load .env file if it exists - because adulting means keeping secrets safe
+# Load .env file if it exists
 load_dotenv()
 
-# Step 2: Utility function to load environment variables - adulting is hard, let's log it!
+# Step 2: Utility function to load environment variables
 def get_env_variable(var_name: str, required: bool = True):
     value = os.getenv(var_name)
     if value:
@@ -48,7 +48,7 @@ def get_env_variable(var_name: str, required: bool = True):
         logger.warning(f"Environment variable '{var_name}' is not set (optional). Meh.")
     return value
 
-# Step 3: Load all necessary environment variables - 'cause we're not playing games here
+# Step 3: Load all necessary environment variables
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
@@ -57,26 +57,29 @@ BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address f
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
 INTERMEDIARY_URL = get_env_variable('INTERMEDIARY_URL')
 
-# Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
+# Step 4: Initialize MongoDB client and cache collection
 client = MongoClient(MONGO_URI)
 db = client['bot_db']
-cache_collection = db['cache']  # Here we store all the cool responses, so we don't have to keep asking Grok, like, all the time
-nonce_collection = db['nonces']  # Nonces are like one-time use codes, but cooler and digital
+cache_collection = db['cache']  # Here we store all the cool responses
+nonce_collection = db['nonces']  # Nonces are like one-time use codes
 
-# Indexing for performance - because even databases need their smoothie
+# Indexing for performance
 cache_collection.create_index([('message', 1), ('persona', 1), ('cached_at', -1)])
 nonce_collection.create_index('user_id', unique=True)
 
-# Step 5: Initialize the Telegram bot application - let's get this party started
+# Step 5: Initialize the Telegram bot application
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Nonce expiry time - because we don't like stale snacks
+# Nonce expiry time
 NONCE_EXPIRY = timedelta(minutes=5)
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(PyMongoError))
 def generate_nonce(user_id):
     """Generate a nonce for user authentication."""
-    nonce = os.urandom(32).hex()  # Generate 32 bytes of random data, then convert to hex because hex is where it's at
+    # Use a timestamp to ensure uniqueness
+    timestamp = int(datetime.utcnow().timestamp() * 1000)  # milliseconds since epoch for higher granularity
+    random_part = os.urandom(16).hex()  # 16 bytes for randomness
+    nonce = f"{timestamp}-{random_part}"
     expiry = datetime.utcnow() + NONCE_EXPIRY
     nonce_collection.update_one(
         {"user_id": user_id}, 
