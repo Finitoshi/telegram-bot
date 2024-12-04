@@ -1,4 +1,4 @@
-# telegram_bot.py
+# Filename: telegram_bot.py
 
 import os
 import logging
@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import urlparse
 
-# Step 1: Configure logging
+# Step 1: Configure logging - because if you're not logging, are you even coding?
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -35,10 +35,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TelegramBotApp")
 
-# Load .env file if it exists
+# Load .env file if it exists - because adulting means keeping secrets safe
 load_dotenv()
 
-# Step 2: Utility function to load environment variables
+# Step 2: Utility function to load environment variables - adulting is hard, let's log it!
 def get_env_variable(var_name: str, required: bool = True):
     value = os.getenv(var_name)
     if value:
@@ -50,7 +50,7 @@ def get_env_variable(var_name: str, required: bool = True):
         logger.warning(f"Environment variable '{var_name}' is not set (optional). Meh.")
     return value
 
-# Step 3: Load all necessary environment variables
+# Step 3: Load all necessary environment variables - 'cause we're not playing games here
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
@@ -59,26 +59,25 @@ BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address f
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
 INTERMEDIARY_URL = get_env_variable('INTERMEDIARY_URL')
 
-# Step 4: Initialize MongoDB client and cache collection
+# Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
 client = MongoClient(MONGO_URI)
 db = client['bot_db']
-cache_collection = db['cache']  # Here we store all the cool responses
-nonce_collection = db['nonces']  # Nonces are like one-time use codes
+cache_collection = db['cache']  # Here we store all the cool responses, so we don't have to keep asking Grok, like, all the time
+nonce_collection = db['nonces']  # Nonces are like one-time use codes, but cooler and digital
 
-# Indexing for performance
+# Indexing for performance - because even databases need their smoothie
 cache_collection.create_index([('message', 1), ('persona', 1), ('cached_at', -1)])
 nonce_collection.create_index('user_id', unique=True)
 
-# Step 5: Initialize the Telegram bot application
+# Step 5: Initialize the Telegram bot application - let's get this party started
 application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-# Nonce expiry time
+# Nonce expiry time - because we don't like stale snacks
 NONCE_EXPIRY = timedelta(minutes=5)
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(PyMongoError))
 def generate_nonce(user_id):
     """Generate a nonce for user authentication."""
-    # Use a timestamp to ensure uniqueness
     timestamp = int(datetime.utcnow().timestamp() * 1000)  # milliseconds since epoch for higher granularity
     random_part = os.urandom(16).hex()  # 16 bytes for randomness
     nonce = f"{timestamp}-{random_part}"
@@ -102,7 +101,7 @@ def get_nonce(user_id):
         logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
         return None
 
-# Step 6: FastAPI application with detailed lifecycle management
+# Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the lifecycle of our app, because everything needs a start and an end."""
@@ -127,14 +126,14 @@ class MessageModel(BaseModel):
     message: str
     persona: Optional[str] = "Chibi"
 
-# Step 7: Health check route
+# Step 7: Health check route - just to make sure we're not dead yet
 @app.get("/health")
 async def health_check():
     """Check if the bot's alive or if it's time to call the ghostbusters."""
     logger.info("Health check endpoint accessed. We're still kicking!")
     return {"status": "OK"}
 
-# Step 8: Query Grok API and cache the response
+# Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def query_grok(message, persona="Chibi"):
     """Ask Grok the wise about life, the universe, and everything, with a touch of Chibi fun."""
@@ -201,12 +200,12 @@ async def query_grok(message, persona="Chibi"):
         logger.exception("Full exception details")
         return f"An unexpected error occurred. {persona}'s taking a nap, I guess. Zzz..."
 
-# Step 9: Image Generation
+# Step 9: Image Generation - Let's make some cute robo-hippos!
 
-# Define the fixed prompt with placeholders for rarity
+# Define the fixed prompt with placeholders for rarity - because who doesn't love a rare robo-hippo?
 BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
 
-# Define the accessories and rarities
+# Define the accessories and rarities - because variety is the spice of robo-life
 RARITY_LEVELS = {
     'common': ['a bow tie', 'a scarf'],
     'uncommon': ['a propeller hat', 'tiny wings'],
@@ -242,7 +241,7 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
-# Step 10: Token gating
+# Step 10: Token gating - let's make sure only the cool cats get in
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def check_token_ownership(wallet_address):
     """Check if someone's got enough of those sweet, sweet tokens."""
@@ -279,7 +278,7 @@ async def verify_signature(wallet_address, message, signature):
         logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
         return False
 
-# Step 11: Webhook handler for Telegram updates
+# Step 11: Webhook handler for Telegram updates - where the magic happens
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def handle_webhook(request: Request):
     """Handle incoming Telegram messages because we need to keep the conversation flowing."""
@@ -339,11 +338,11 @@ async def handle_webhook(request: Request):
                 success, response = await send_prompt_to_intermediary(prompt)
                 if success:
                     if 'image' in response:
-                        # TODO: Implement sending images via Telegram API
+                        # Here's where we finally send the image. No more TODOs for you!
                         image_url = response['image']
-                        await application.bot.send_photo(chat_id=chat_id, photo=image_url)
+                        await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Behold the robo-hippo in all its glory!")
                     else:
-                        await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned.")
+                        await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned. AI's art must be too abstract for us.")
                 else:
                     await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Try again later or check if the AI is napping.")
             else:
@@ -355,7 +354,7 @@ async def handle_webhook(request: Request):
 
     return {"status": "ok"}
 
-# Middleware for logging requests and responses
+# Middleware for logging requests and responses - because we like to keep track of everything
 class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         logger.info(f"Incoming request: {request.method} {request.url}. What's up, internet?")
@@ -369,7 +368,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(LoggingMiddleware)
 
-# Error handler for validation errors
+# Error handler for validation errors - because we all make mistakes, even our users
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
     logger.error(f"Validation error: {exc.errors()}")
@@ -378,8 +377,8 @@ async def validation_exception_handler(request, exc):
         content={"detail": exc.errors(), "body": exc.body},
     )
 
-# Step 13: Ensure the application listens on the correct port
+# Step 13: Ensure the application listens on the correct port - because we need to be heard
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set
+    port = int(os.getenv("PORT", 8000))  # Default to 8000 if PORT is not set, 'cause we're flexible like that
     uvicorn.run(app, host="0.0.0.0", port=port)
