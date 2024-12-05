@@ -247,7 +247,7 @@ async def send_prompt_to_intermediary(prompt):
 async def check_token_ownership(wallet_address):
     """Check if someone's got enough of those sweet, sweet tokens."""
     try:
-                solana_client = Client(SOLANA_RPC_URL)
+        solana_client = Client(SOLANA_RPC_URL)
         user_wallet = PublicKey(wallet_address)
         token_balance = solana_client.get_token_account_balance(user_wallet, BITTY_TOKEN_ADDRESS)
 
