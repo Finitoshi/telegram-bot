@@ -95,9 +95,12 @@ def get_nonce(user_id):
     # Bypassing nonce check for now
     return None
 
-# Global variables for rate limiting and state management
+# Global variables for rate limiting, state management, and command control
 last_image_time = {}
 processing_image = {}
+user_command_count = {}
+image_generation_enabled = False  # Disable image generation for now
+MAX_COMMANDS_PER_MINUTE = 5
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
@@ -198,7 +201,7 @@ async def query_grok(message, persona="Chibi"):
         logger.exception("Full exception details")
         return f"An unexpected error occurred. {persona}'s taking a nap, I guess. Zzz..."
 
-# Step 9: Image Generation - Let's make some cute robo-hippos!
+# Step 9: Image Generation - Let's make some cute robo-hippos! (But not right now, 'cause we're on a break)
 
 # Define the fixed prompt with placeholders for rarity - because who doesn't love a rare robo-hippo?
 BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
@@ -244,7 +247,7 @@ async def send_prompt_to_intermediary(prompt):
 async def check_token_ownership(wallet_address):
     """Check if someone's got enough of those sweet, sweet tokens."""
     try:
-        solana_client = Client(SOLANA_RPC_URL)
+                solana_client = Client(SOLANA_RPC_URL)
         user_wallet = PublicKey(wallet_address)
         token_balance = solana_client.get_token_account_balance(user_wallet, BITTY_TOKEN_ADDRESS)
 
@@ -276,6 +279,12 @@ async def verify_signature(wallet_address, message, signature):
         logger.error(f"Signature verification failed: {e}. Did you sign this with your eyes closed?")
         return False
 
+async def reset_command_count(chat_id):
+    """Reset command count after some time."""
+    await asyncio.sleep(60)
+    if chat_id in user_command_count:
+        user_command_count[chat_id] = 0
+
 # Step 11: Webhook handler for Telegram updates - where the magic happens
 @app.post(f"/{TELEGRAM_BOT_TOKEN}")
 async def handle_webhook(request: Request):
@@ -288,43 +297,37 @@ async def handle_webhook(request: Request):
         message = telegram_update.message.text
         chat_id = telegram_update.message.chat_id
         
-        # Rate limiting for image generation
-        if chat_id not in last_image_time or time.time() - last_image_time.get(chat_id, 0) > 60:  # 60 seconds cooldown
-            last_image_time[chat_id] = time.time()
-        else:
-            await application.bot.send_message(chat_id=chat_id, text="Chill, my circuits need a break! Wait a minute before generating another image.")
-            return {"status": "ok"}
+        logger.info(f"Received message from user {chat_id}: {message}")
         
+        # Command rate limiting
+        if chat_id not in user_command_count:
+            user_command_count[chat_id] = 0
+        user_command_count[chat_id] += 1
+
+        if user_command_count[chat_id] > MAX_COMMANDS_PER_MINUTE:
+            await application.bot.send_message(chat_id=chat_id, text="Whoa, slow down! You've hit your command limit for now.")
+            asyncio.create_task(reset_command_count(chat_id))
+            return {"status": "ok"}
+
         # Bypassing nonce check for now
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
-            if message.lower().startswith("/generate_image"):
-                if chat_id in processing_image and processing_image[chat_id]:
-                    await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
-                    return {"status": "ok"}
-                processing_image[chat_id] = True
-                logger.info(f"User {chat_id} requested image generation.")
-                await application.bot.send_message(chat_id=chat_id, text="Starting image generation. Hang tight!")
-                try:
-                    prompt = generate_image_prompt()
-                    await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                    
-                    # Send the prompt to the intermediary service
-                    success, response = await send_prompt_to_intermediary(prompt)
-                    if success:
-                        if 'image' in response:
-                            # Here's where we finally send the image. No more TODOs for you!
-                            image_url = response['image']
-                            await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Behold the robo-hippo in all its glory!")
-                            logger.info(f"Image generation completed for user {chat_id}.")
-                        else:
-                            await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned. AI's art must be too abstract for us.")
+            if message.lower() == "/generate_image":
+                if not image_generation_enabled:
+                    await application.bot.send_message(chat_id=chat_id, text="Image generation is currently taking a nap. Check back later!")
+                else:
+                    if chat_id in processing_image and processing_image[chat_id]:
+                        await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
                     else:
-                        await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Try again later or check if the AI is napping.")
-                except Exception as e:
-                    logger.error(f"Error during image generation: {e}")
-                    await application.bot.send_message(chat_id=chat_id, text="Something went wrong with the image generation. Try again later?")
-                finally:
-                    processing_image[chat_id] = False
+                        processing_image[chat_id] = True
+                        try:
+                            await application.bot.send_message(chat_id=chat_id, text="Starting image generation. Hang tight!")
+                            # Image generation code here - currently disabled
+                        except Exception as e:
+                            logger.error(f"Error during image generation attempt: {e}")
+                            await application.bot.send_message(chat_id=chat_id, text="Something went wrong. No robo-hippos for you today.")
+                        finally:
+                            if chat_id in processing_image:
+                                processing_image[chat_id] = False
             else:
                 # For text-based queries, use the updated query_grok function
                 chibi_response = await query_grok(message)
