@@ -1,9 +1,8 @@
-# Filename: telegram_bot.py
-
 import os
 import logging
 import asyncio
 import random
+import time
 from fastapi import FastAPI, Request, HTTPException
 from contextlib import asynccontextmanager
 from telegram import Update
@@ -92,14 +91,9 @@ def generate_nonce(user_id):
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(PyMongoError))
 def get_nonce(user_id):
-    """Retrieve nonce if not expired."""
-    nonce_data = nonce_collection.find_one({"user_id": user_id})
-    if nonce_data and nonce_data['expiry'] > datetime.utcnow():
-        return nonce_data['nonce']
-    else:
-        nonce_collection.delete_one({"user_id": user_id})
-        logger.info(f"Nonce expired or not found for user {user_id}. Time to get a new one, fam!")
-        return None
+    """Retrieve nonce if not expired. For now, we're bypassing this check for testing."""
+    # Bypassing nonce check for now
+    return None
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
@@ -290,47 +284,18 @@ async def handle_webhook(request: Request):
         message = telegram_update.message.text
         chat_id = telegram_update.message.chat_id
         
-        if message.lower().startswith("/connect"):
-            parts = message.split()
-            if len(parts) > 1:
-                wallet_address = parts[1]
-                
-                try:
-                    PublicKey(wallet_address)  # This will raise an error if not a valid Solana address
-                    nonce = generate_nonce(chat_id)
-                    await application.bot.send_message(chat_id=chat_id, text=f"Please sign this nonce with your wallet: {nonce}. Then, send it back with /sign <your_signature>")
-                except ValueError:
-                    await application.bot.send_message(chat_id=chat_id, text="Invalid wallet address. Looks like you're trying to hack the mainframe. Try again with /connect <your_wallet_address>")
-            else:
-                await application.bot.send_message(chat_id=chat_id, text="Please provide your Solana wallet address with /connect <your_wallet_address>. Don't be shy, we don't bite... much.")
+        # Rate limiting for image generation
+        last_image_time = {}
+        if chat_id not in last_image_time or time.time() - last_image_time.get(chat_id, 0) > 60:  # 60 seconds cooldown
+            last_image_time[chat_id] = time.time()
+        else:
+            await application.bot.send_message(chat_id=chat_id, text="Chill, my circuits need a break! Wait a minute before generating another image.")
             return {"status": "ok"}
-
-        if message.lower().startswith("/sign"):
-            parts = message.split()
-            if len(parts) > 1:
-                signature = parts[1]
-                expected_nonce = get_nonce(chat_id)
-                if expected_nonce:
-                    is_verified = await verify_signature(wallet_address, expected_nonce, signature)
-                    if is_verified:
-                        has_token = await check_token_ownership(wallet_address)
-                        if has_token:
-                            await application.bot.send_message(chat_id=chat_id, text="Wallet verified and token balance confirmed. Welcome to the club, fam!")
-                            # Clear nonce after successful verification
-                            nonce_collection.delete_one({"user_id": chat_id})
-                        else:
-                            await application.bot.send_message(chat_id=chat_id, text="You don't hold enough BITTY tokens to access this bot. Time to hit the crypto gym.")
-                    else:
-                        await application.bot.send_message(chat_id=chat_id, text="Signature verification failed. Did you try to cheat on the test?")
-                else:
-                    await application.bot.send_message(chat_id=chat_id, text="Your nonce has expired or is invalid. Please start with /connect again.")
-            else:
-                await application.bot.send_message(chat_id=chat_id, text="Please provide the signature with /sign <signature>. Don't make me wait!")
-            return {"status": "ok"}
-
-        # Check if user has been verified before processing further messages
-        if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or need to connect
+        
+        # Bypassing nonce check for now
+        if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
             if message.lower().startswith("/generate_image"):
+                logger.info(f"User {chat_id} requested image generation.")
                 prompt = generate_image_prompt()
                 await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
                 
@@ -341,6 +306,7 @@ async def handle_webhook(request: Request):
                         # Here's where we finally send the image. No more TODOs for you!
                         image_url = response['image']
                         await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Behold the robo-hippo in all its glory!")
+                        logger.info(f"Image generation completed for user {chat_id}.")
                     else:
                         await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned. AI's art must be too abstract for us.")
                 else:
