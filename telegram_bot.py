@@ -95,6 +95,10 @@ def get_nonce(user_id):
     # Bypassing nonce check for now
     return None
 
+# Global variables for rate limiting and state management
+last_image_time = {}
+processing_image = {}
+
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -285,7 +289,6 @@ async def handle_webhook(request: Request):
         chat_id = telegram_update.message.chat_id
         
         # Rate limiting for image generation
-        last_image_time = {}
         if chat_id not in last_image_time or time.time() - last_image_time.get(chat_id, 0) > 60:  # 60 seconds cooldown
             last_image_time[chat_id] = time.time()
         else:
@@ -295,22 +298,33 @@ async def handle_webhook(request: Request):
         # Bypassing nonce check for now
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
             if message.lower().startswith("/generate_image"):
+                if chat_id in processing_image and processing_image[chat_id]:
+                    await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
+                    return {"status": "ok"}
+                processing_image[chat_id] = True
                 logger.info(f"User {chat_id} requested image generation.")
-                prompt = generate_image_prompt()
-                await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                
-                # Send the prompt to the intermediary service
-                success, response = await send_prompt_to_intermediary(prompt)
-                if success:
-                    if 'image' in response:
-                        # Here's where we finally send the image. No more TODOs for you!
-                        image_url = response['image']
-                        await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Behold the robo-hippo in all its glory!")
-                        logger.info(f"Image generation completed for user {chat_id}.")
+                await application.bot.send_message(chat_id=chat_id, text="Starting image generation. Hang tight!")
+                try:
+                    prompt = generate_image_prompt()
+                    await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
+                    
+                    # Send the prompt to the intermediary service
+                    success, response = await send_prompt_to_intermediary(prompt)
+                    if success:
+                        if 'image' in response:
+                            # Here's where we finally send the image. No more TODOs for you!
+                            image_url = response['image']
+                            await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Behold the robo-hippo in all its glory!")
+                            logger.info(f"Image generation completed for user {chat_id}.")
+                        else:
+                            await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned. AI's art must be too abstract for us.")
                     else:
-                        await application.bot.send_message(chat_id=chat_id, text="Image generation was successful, but no image data returned. AI's art must be too abstract for us.")
-                else:
-                    await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Try again later or check if the AI is napping.")
+                        await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Try again later or check if the AI is napping.")
+                except Exception as e:
+                    logger.error(f"Error during image generation: {e}")
+                    await application.bot.send_message(chat_id=chat_id, text="Something went wrong with the image generation. Try again later?")
+                finally:
+                    processing_image[chat_id] = False
             else:
                 # For text-based queries, use the updated query_grok function
                 chibi_response = await query_grok(message)
