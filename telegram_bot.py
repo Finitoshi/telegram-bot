@@ -53,7 +53,6 @@ def get_env_variable(var_name: str, required: bool = True):
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
-GROK_VISION_API_URL = get_env_variable('GROK_VISION_API_URL', required=False) or "https://api.x.ai/v1/vision/completions"
 MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
@@ -137,7 +136,7 @@ async def health_check():
 
 # Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-async def query_grok(message, persona="Chibi", use_vision=False):
+async def query_grok(message, persona="Chibi", model_id="grok-beta"):
     """Ask Grok the wise about life, the universe, and everything, with a touch of Chibi fun."""
     cached_response = cache_collection.find_one({
         "message": message,
@@ -161,23 +160,21 @@ async def query_grok(message, persona="Chibi", use_vision=False):
             },
             {"role": "user", "content": message}
         ],
-        "model": "grok-vision-beta" if use_vision else "grok-beta",
+        "model": model_id,
         "stream": False,
         "temperature": 0.7  # Higher for more playful responses
     }
-    api_url = GROK_VISION_API_URL if use_vision else GROK_API_URL
-    logger.info(f"Sending to Grok API as {persona}: {payload}. Let's get this party started!")
+    logger.info(f"Sending to Grok API as {persona} with model {model_id}: {payload}. Let's get this party started!")
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            logger.debug(f"API URL: {api_url}")
-            response = await client.post(api_url, headers=headers, json=payload)
-            logger.info(f"Received response from Grok API as {persona}: Status code {response.status_code}")
+            response = await client.post(GROK_API_URL, headers=headers, json=payload)
+            logger.info(f"Received response from Grok API as {persona} with model {model_id}: Status code {response.status_code}")
             logger.debug(f"Response content: {response.text}")
             
             response.raise_for_status()  # This will raise an error for HTTP errors
             response_data = response.json()
-            logger.info(f"Grok API response as {persona}: {response_data}")
+            logger.info(f"Grok API response as {persona} with model {model_id}: {response_data}")
             
             # Extract response from Grok API
             chibi_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', f"{persona} didn't respond properly. Guess AI has its off days too.")
@@ -197,14 +194,14 @@ async def query_grok(message, persona="Chibi", use_vision=False):
             return chibi_response
     except httpx.HTTPStatusError as e:
         # Log the specific HTTP error details
-        logger.error(f"Grok API HTTP error while asking as {persona}: Status code {e.response.status_code}, Response: {e.response.text}. That's not very {persona} of you!")
+        logger.error(f"Grok API HTTP error while asking as {persona} with model {model_id}: Status code {e.response.status_code}, Response: {e.response.text}. That's not very {persona} of you!")
         return f"An error occurred while querying {persona}. #AIOops"
     except httpx.ReadTimeout:
-        logger.error(f"Grok API request timed out while {persona} was thinking. {persona} must be on a coffee break.")
+        logger.error(f"Grok API request timed out while {persona} with model {model_id} was thinking. {persona} must be on a coffee break.")
         return f"Sorry, I'm taking longer than usual to respond. Try again in a bit, fam?"
     except Exception as e:
         # Log full exception traceback
-        logger.error(f"Unexpected error with Grok API while asking as {persona}: {e}. {persona}'s gone rogue!")
+        logger.error(f"Unexpected error with Grok API while asking as {persona} with model {model_id}: {e}. {persona}'s gone rogue!")
         logger.exception("Full exception details")
         return f"An unexpected error occurred. {persona}'s taking a nap, I guess. Zzz..."
 
@@ -327,7 +324,7 @@ async def handle_webhook(request: Request):
                         logger.info(f"Attempting image generation with Grok Vision Beta for user {chat_id}")
                         prompt = generate_image_prompt()
                         await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                        response = await query_grok(prompt, use_vision=True)
+                        response = await query_grok(prompt, model_id="grok-vision-beta")
                         if "Image generated:" in response:
                             image_url = response.split("Image generated:")[1].strip()
                             logger.info(f"Image URL from Grok Vision: {image_url}")
