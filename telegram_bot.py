@@ -28,7 +28,7 @@ from urllib.parse import urlparse
 
 # Step 1: Configure logging - because if you're not logging, are you even coding?
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG for more detailed logging
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -53,6 +53,7 @@ def get_env_variable(var_name: str, required: bool = True):
 TELEGRAM_BOT_TOKEN = get_env_variable('TELEGRAM_BOT_TOKEN')
 GROK_API_KEY = get_env_variable('GROK_API_KEY')
 GROK_API_URL = get_env_variable('GROK_API_URL', required=False) or "https://api.x.ai/v1/chat/completions"
+GROK_VISION_API_URL = get_env_variable('GROK_VISION_API_URL', required=False) or "https://api.x.ai/v1/vision/completions"
 MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
@@ -99,7 +100,7 @@ def get_nonce(user_id):
 last_image_time = {}
 processing_image = {}
 user_command_count = {}
-image_generation_enabled = False  # Disable image generation for now
+image_generation_enabled = True  # Enable image generation for testing
 MAX_COMMANDS_PER_MINUTE = 5
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
@@ -136,7 +137,7 @@ async def health_check():
 
 # Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-async def query_grok(message, persona="Chibi"):
+async def query_grok(message, persona="Chibi", use_vision=False):
     """Ask Grok the wise about life, the universe, and everything, with a touch of Chibi fun."""
     cached_response = cache_collection.find_one({
         "message": message,
@@ -160,15 +161,17 @@ async def query_grok(message, persona="Chibi"):
             },
             {"role": "user", "content": message}
         ],
-        "model": "grok-beta",
+        "model": "grok-vision-beta" if use_vision else "grok-beta",
         "stream": False,
         "temperature": 0.7  # Higher for more playful responses
     }
+    api_url = GROK_VISION_API_URL if use_vision else GROK_API_URL
     logger.info(f"Sending to Grok API as {persona}: {payload}. Let's get this party started!")
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(GROK_API_URL, headers=headers, json=payload)
+            logger.debug(f"API URL: {api_url}")
+            response = await client.post(api_url, headers=headers, json=payload)
             logger.info(f"Received response from Grok API as {persona}: Status code {response.status_code}")
             logger.debug(f"Response content: {response.text}")
             
@@ -178,6 +181,10 @@ async def query_grok(message, persona="Chibi"):
             
             # Extract response from Grok API
             chibi_response = response_data.get('choices', [{}])[0].get('message', {}).get('content', f"{persona} didn't respond properly. Guess AI has its off days too.")
+            
+            # Check if there's an image in the response
+            if 'image' in response_data.get('choices', [{}])[0].get('message', {}):
+                chibi_response += "\nImage generated: " + response_data['choices'][0]['message']['image']
             
             # Cache the response with persona
             cache_data = {
@@ -201,7 +208,7 @@ async def query_grok(message, persona="Chibi"):
         logger.exception("Full exception details")
         return f"An unexpected error occurred. {persona}'s taking a nap, I guess. Zzz..."
 
-# Step 9: Image Generation - Let's make some cute robo-hippos! (But not right now, 'cause we're on a break)
+# Step 9: Image Generation - Let's make some cute robo-hippos!
 
 # Define the fixed prompt with placeholders for rarity - because who doesn't love a rare robo-hippo?
 BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
@@ -311,23 +318,29 @@ async def handle_webhook(request: Request):
 
         # Bypassing nonce check for now
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
-            if message.lower() == "/generate_image":
-                if not image_generation_enabled:
-                    await application.bot.send_message(chat_id=chat_id, text="Image generation is currently taking a nap. Check back later!")
+            if message.lower() == "/generate_image_test":
+                if chat_id in processing_image and processing_image[chat_id]:
+                    await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
                 else:
-                    if chat_id in processing_image and processing_image[chat_id]:
-                        await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
-                    else:
-                        processing_image[chat_id] = True
-                        try:
-                            await application.bot.send_message(chat_id=chat_id, text="Starting image generation. Hang tight!")
-                            # Image generation code here - currently disabled
-                        except Exception as e:
-                            logger.error(f"Error during image generation attempt: {e}")
-                            await application.bot.send_message(chat_id=chat_id, text="Something went wrong. No robo-hippos for you today.")
-                        finally:
-                            if chat_id in processing_image:
-                                processing_image[chat_id] = False
+                    processing_image[chat_id] = True
+                    try:
+                        logger.info(f"Attempting image generation with Grok Vision Beta for user {chat_id}")
+                        prompt = generate_image_prompt()
+                        await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
+                        response = await query_grok(prompt, use_vision=True)
+                        if "Image generated:" in response:
+                            image_url = response.split("Image generated:")[1].strip()
+                            logger.info(f"Image URL from Grok Vision: {image_url}")
+                            await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Here's your robo-hippo in all its glory!")
+                        else:
+                            logger.warning(f"No image was generated. Response: {response}")
+                            await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Here's what Grok said: " + response)
+                    except Exception as e:
+                        logger.error(f"Error during image generation with Grok Vision: {e}")
+                        await application.bot.send_message(chat_id=chat_id, text="Something went wrong with image generation. Try again later?")
+                    finally:
+                        if chat_id in processing_image:
+                            processing_image[chat_id] = False
             else:
                 # For text-based queries, use the updated query_grok function
                 chibi_response = await query_grok(message)
