@@ -12,7 +12,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 import json
 from datetime import datetime, timedelta
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_fixed, wait_exponential, retry_if_exception_type
 from solana.publickey import PublicKey
 from solana.rpc.api import Client
 from solana.transaction import Transaction
@@ -68,7 +68,6 @@ client = MongoClient(MONGO_URI)
 db = client['bot_db']
 cache_collection = db['cache']  # Here we store all the cool responses, so we don't have to keep asking Grok, like, all the time
 nonce_collection = db['nonces']  # Nonces are like one-time use codes, but cooler and digital
-
 # Indexing for performance - because even databases need their smoothie
 cache_collection.create_index([('message', 1), ('persona', 1), ('cached_at', -1)])
 nonce_collection.create_index('user_id', unique=True)
@@ -79,7 +78,7 @@ application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 # Nonce expiry time - because we don't like stale snacks
 NONCE_EXPIRY = timedelta(minutes=5)
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(PyMongoError))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5), retry=retry_if_exception_type(PyMongoError))
 def generate_nonce(user_id):
     """Generate a nonce for user authentication."""
     timestamp = int(datetime.utcnow().timestamp() * 1000)  # milliseconds since epoch for higher granularity
@@ -94,7 +93,7 @@ def generate_nonce(user_id):
     logger.info(f"Generated nonce for user {user_id}. Expires at {expiry}. Don't be late, or it's back to square one!")
     return nonce
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(PyMongoError))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5), retry=retry_if_exception_type(PyMongoError))
 def get_nonce(user_id):
     """Retrieve nonce if not expired. For now, we're bypassing this check for testing."""
     # Bypassing nonce check for now
@@ -144,7 +143,7 @@ async def health_check():
     return {"status": "OK"}
 
 # Step 8: Query Grok API and cache the response - 'cause we're all about that efficiency, no buffering
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 async def query_grok(message, persona="Chibi", model_id="grok-beta"):
     """Ask Grok the wise about life, the universe, and everything, with a touch of Chibi fun."""
     cached_response = cache_collection.find_one({
@@ -161,7 +160,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
         "Authorization": f"Bearer {GROK_API_KEY}",
         "Content-Type": "application/json"
     }
-       payload = {
+    payload = {
         "messages": [
             {
                 "role": "system",
@@ -177,7 +176,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(GROK_API_URL, headers=headers, json=payload)
+                       response = await client.post(GROK_API_URL, headers=headers, json=payload)
             logger.info(f"Received response from Grok API as {persona} with model {model_id}: Status code {response.status_code}")
             logger.debug(f"Response content: {response.text}")
             
@@ -217,7 +216,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
 # Step 9: Image Generation - Let's make some cute robo-hippos!
 
 # Define the fixed prompt with placeholders for rarity - because who doesn't love a rare robo-hippo?
-BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
+BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for    for extra cuteness. Rarity: {rarity}"
 
 # Define the accessories and rarities - because variety is the spice of robo-life
 RARITY_LEVELS = {
@@ -226,16 +225,16 @@ RARITY_LEVELS = {
     'rare': ['a mini jetpack', 'a magic wand']
 }
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def generate_image_prompt():
-    """Craft a prompt for generating rad robo-hippo images."""
+    """Craft a prompt for generating     rad robo-hippo images."""
     rarity = random.choice(list(RARITY_LEVELS.keys()))
     accessory = random.choice(RARITY_LEVELS[rarity])
     prompt = BASE_PROMPT.format(accessory=accessory, rarity=rarity)
     logger.info(f"Generated image prompt: {prompt}. Let's see if we can whip up a rare robo-hippo!")
     return prompt
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 async def send_prompt_to_intermediary(prompt):
     """
     Send the image generation prompt to an intermediary service for processing.
@@ -255,9 +254,13 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(Exception))
-async def generate_image_with_flux(prompt):
+@retry(stop=stop_after_attempt(3), 
+       wait=wait_exponential(multiplier=1, min=300, max=600),  # 5 minutes to 10 minutes
+       retry=retry_if_exception_type(Exception))
+async def generate_image_with_flux(prompt, chat_id):
     try:
+        await application.bot.send_message(chat_id=chat_id, text="Hang tight! This could take a little while, but I'll definitely let you know when your image is ready! 😎")
+        
         image = hf_client(
             prompt=prompt,
             guidance_scale=0.0,  # Required for FLUX.1-schnell
@@ -273,10 +276,11 @@ async def generate_image_with_flux(prompt):
         return img_byte_arr.getvalue()
     except Exception as e:
         logger.error(f"Error during image generation with Flux: {e}")
+        await application.bot.send_message(chat_id=chat_id, text="Oops, something didn't vibe right with the image generation. I'll give it another shot soon! 🤖")
         raise
 
 # Step 10: Token gating - let's make sure only the cool cats get in
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 async def check_token_ownership(wallet_address):
     """Check if someone's got enough of those sweet, sweet tokens."""
     try:
@@ -294,7 +298,7 @@ async def check_token_ownership(wallet_address):
         return False
 
 # Secure Signature Verification
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 async def verify_signature(wallet_address, message, signature):
     """Verify if this signature is legit or if someone's just scribbling."""
     try:
@@ -355,12 +359,12 @@ async def handle_webhook(request: Request):
                         await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
                         
                         try:
-                            img_byte_arr = await generate_image_with_flux(prompt)
+                            img_byte_arr = await generate_image_with_flux(prompt, chat_id)
                             await application.bot.send_photo(chat_id=chat_id, photo=img_byte_arr, caption="Here's your robo-hippo in all its glory!")
                         except Exception as e:
-                            await application.bot.send_message(chat_id=chat_id, text=f"Failed to generate image via Flux. Here's what went wrong: {str(e)}")
+                            logger.error(f"Failed to generate image via Flux for user {chat_id}. Error: {str(e)}")
                     except Exception as e:
-                        logger.error(f"General error during image generation process: {e}")
+                        logger.error(f"General error during image generation process for user {chat_id}: {e}")
                         await application.bot.send_message(chat_id=chat_id, text="Something went wrong with image generation. Try again later?")
                     finally:
                         if chat_id in processing_image:
