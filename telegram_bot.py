@@ -171,7 +171,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
         ],
         "model": model_id,
         "stream": False,
-        "temperature": 0.7  # Higher for more playful responses
+        "temperature": 0.9  # Higher for more playful responses
     }
     logger.info(f"Sending to Grok API as {persona} with model {model_id}: {payload}. Let's get this party started!")
     
