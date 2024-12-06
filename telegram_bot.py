@@ -176,7 +176,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-                       response = await client.post(GROK_API_URL, headers=headers, json=payload)
+            response = await client.post(GROK_API_URL, headers=headers, json=payload)
             logger.info(f"Received response from Grok API as {persona} with model {model_id}: Status code {response.status_code}")
             logger.debug(f"Response content: {response.text}")
             
@@ -216,8 +216,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
 # Step 9: Image Generation - Let's make some cute robo-hippos!
 
 # Define the fixed prompt with placeholders for rarity - because who doesn't love a rare robo-hippo?
-BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for    for extra cuteness. Rarity: {rarity}"
-
+BASE_PROMPT = "Imagine this baby robotic pygmy hippo, but with a manga twist. Think big, adorable eyes, a tiny, metallic body, and maybe some cute little robotic accessories like a {accessory}. Style: I'm thinking of that classic manga art style - clean lines, exaggerated features, and a touch of chibi for extra cuteness. Rarity: {rarity}"
 # Define the accessories and rarities - because variety is the spice of robo-life
 RARITY_LEVELS = {
     'common': ['a bow tie', 'a scarf'],
@@ -227,7 +226,7 @@ RARITY_LEVELS = {
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(5))
 def generate_image_prompt():
-    """Craft a prompt for generating     rad robo-hippo images."""
+    """Craft a prompt for generating rad robo-hippo images."""
     rarity = random.choice(list(RARITY_LEVELS.keys()))
     accessory = random.choice(RARITY_LEVELS[rarity])
     prompt = BASE_PROMPT.format(accessory=accessory, rarity=rarity)
