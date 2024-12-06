@@ -25,7 +25,8 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import urlparse
-from huggingface_hub import InferenceClient
+import torch
+from diffusers import FluxPipeline
 from PIL import Image
 import io
 
@@ -106,8 +107,9 @@ user_command_count = {}
 image_generation_enabled = True  # Enable image generation for testing
 MAX_COMMANDS_PER_MINUTE = 5
 
-# Hugging Face Inference Client
-hf_client = InferenceClient("black-forest-labs/FLUX.1-dev", token=FLUX_KEY)  # Updated with new key and model
+# Flux Pipeline Initialization
+hf_client = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16)
+hf_client.enable_model_cpu_offload()  # For memory efficiency
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
@@ -159,7 +161,7 @@ async def query_grok(message, persona="Chibi", model_id="grok-beta"):
         "Authorization": f"Bearer {GROK_API_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
+       payload = {
         "messages": [
             {
                 "role": "system",
@@ -253,6 +255,26 @@ async def send_prompt_to_intermediary(prompt):
         logger.error(f"Unexpected error sending prompt to intermediary: {e}. Maybe the hippo got lost in transit.")
         return False, None
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(Exception))
+async def generate_image_with_flux(prompt):
+    try:
+        image = hf_client(
+            prompt=prompt,
+            guidance_scale=0.0,  # Required for FLUX.1-schnell
+            height=512,  # Adjust based on your needs and available VRAM
+            width=512,
+            num_inference_steps=4,
+            max_sequence_length=256  # Required for FLUX.1-schnell
+        ).images[0]
+        
+        # Convert the image to bytes for Telegram
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='PNG')
+        return img_byte_arr.getvalue()
+    except Exception as e:
+        logger.error(f"Error during image generation with Flux: {e}")
+        raise
+
 # Step 10: Token gating - let's make sure only the cool cats get in
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def check_token_ownership(wallet_address):
@@ -322,33 +344,21 @@ async def handle_webhook(request: Request):
 
         # Bypassing nonce check for now
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
-            # Change here to recognize both commands
-            if message.lower() in ["/generate_image_test", "/generate_test_image"]:
+            if message.lower() in ["/generate_image_test", "/generate_test_image", "/generate_image"]:
                 if chat_id in processing_image and processing_image[chat_id]:
-                    await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
+                    await application.bot.send_message(chat_id=chat_id, text="Hold on, I'm already working on that image for you!")
                 else:
                     processing_image[chat_id] = True
                     try:
-                        logger.info(f"Attempting image generation with Hugging Face for user {chat_id}")
+                        logger.info(f"Attempting image generation with Flux for user {chat_id}")
                         prompt = generate_image_prompt()
                         await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
                         
-                        # Generate image using Hugging Face
                         try:
-                            image = hf_client.text_to_image(prompt, 
-                                                            guidance_scale=7.5,  # Example parameter, adjust as needed
-                                                            num_inference_steps=50,  # Example, adjust for quality/speed trade-off
-                                                            target_size={"width": 512, "height": 512})  # Example size, adjust as needed
-                            # Convert the image to bytes for Telegram
-                            img_byte_arr = io.BytesIO()
-                            image.save(img_byte_arr, format='PNG')
-                            img_byte_arr = img_byte_arr.getvalue()
-                            
-                            # Send the image to Telegram
+                            img_byte_arr = await generate_image_with_flux(prompt)
                             await application.bot.send_photo(chat_id=chat_id, photo=img_byte_arr, caption="Here's your robo-hippo in all its glory!")
                         except Exception as e:
-                            logger.error(f"Error during image generation with Hugging Face: {e}")
-                            await application.bot.send_message(chat_id=chat_id, text="Failed to generate image via Hugging Face. Here's what went wrong: " + str(e))
+                            await application.bot.send_message(chat_id=chat_id, text=f"Failed to generate image via Flux. Here's what went wrong: {str(e)}")
                     except Exception as e:
                         logger.error(f"General error during image generation process: {e}")
                         await application.bot.send_message(chat_id=chat_id, text="Something went wrong with image generation. Try again later?")
