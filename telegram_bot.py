@@ -324,20 +324,28 @@ async def handle_webhook(request: Request):
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
             if message.lower() == "/generate_image_test":
                 if chat_id in processing_image and processing_image[chat_id]:
-                    await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
+                    await application.bot.send_message(chat_id=chat_id, text="Hold on, I'm already working on that image for you!")
                 else:
                     processing_image[chat_id] = True
                     try:
                         logger.info(f"Attempting image generation with Hugging Face for user {chat_id}")
                         prompt = generate_image_prompt()
                         await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                        
-                        # Generate image using Hugging Face
+
+                        @retry(stop=stop_after_attempt(3), wait=wait_fixed(2), retry=retry_if_exception_type(Exception), before_sleep=lambda retry_state: logger.info(f"Retrying image generation. Attempt {retry_state.attempt_number}"))
+                        def generate_image():
+                            try:
+                                image = hf_client.text_to_image(prompt, 
+                                                                guidance_scale=7.5,  # Example parameter, adjust as needed
+                                                                num_inference_steps=50,  # Example, adjust for quality/speed trade-off
+                                                                target_size={"width": 512, "height": 512})  # Example size, adjust as needed
+                                return image
+                            except Exception as e:
+                                logger.error(f"Error during image generation with Hugging Face: {e}")
+                                raise
+
                         try:
-                            image = hf_client.text_to_image(prompt, 
-                                                            guidance_scale=7.5,  # Example parameter, adjust as needed
-                                                            num_inference_steps=50,  # Example, adjust for quality/speed trade-off
-                                                            target_size={"width": 512, "height": 512})  # Example size, adjust as needed
+                            image = generate_image()
                             # Convert the image to bytes for Telegram
                             img_byte_arr = io.BytesIO()
                             image.save(img_byte_arr, format='PNG')
@@ -346,7 +354,6 @@ async def handle_webhook(request: Request):
                             # Send the image to Telegram
                             await application.bot.send_photo(chat_id=chat_id, photo=img_byte_arr, caption="Here's your robo-hippo in all its glory!")
                         except Exception as e:
-                            logger.error(f"Error during image generation with Hugging Face: {e}")
                             await application.bot.send_message(chat_id=chat_id, text="Failed to generate image via Hugging Face. Here's what went wrong: " + str(e))
                     except Exception as e:
                         logger.error(f"General error during image generation process: {e}")
