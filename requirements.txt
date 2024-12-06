@@ -9,8 +9,8 @@ solana==0.25.0  # Upgrade to ensure compatibility with httpx 0.23.1
 tenacity==8.2.2
 cryptography==3.4.7
 nest-asyncio==1.5.6
-huggingface_hub==0.16.4  # For Hugging Face Inference API
+huggingface_hub>=0.23.2
 Pillow==10.0.0  # For image handling
 torch==2.5.1
-diffusers==0.31.0
+diffusers==0.22.0  # or another version compatible with huggingface_hub 0.16.4
 transformers==4.46.3
