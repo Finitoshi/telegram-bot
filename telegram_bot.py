@@ -107,7 +107,7 @@ image_generation_enabled = True  # Enable image generation for testing
 MAX_COMMANDS_PER_MINUTE = 5
 
 # Hugging Face Inference Client
-hf_client = InferenceClient("black-forest-labs/FLUX.1-dev", token=FLUX_KEY)  # Updated with new key and model
+hf_client = InferenceClient("black-forest-labs/FLUX.1-schnell", token=FLUX_KEY)  # Updated with new key and model
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
