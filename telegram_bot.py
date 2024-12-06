@@ -322,7 +322,8 @@ async def handle_webhook(request: Request):
 
         # Bypassing nonce check for now
         if get_nonce(chat_id) is None:  # User has no valid nonce, meaning they're verified or we're bypassing verification
-            if message.lower() == "/generate_image_test":
+            # Change here to recognize both commands
+            if message.lower() in ["/generate_image_test", "/generate_test_image"]:
                 if chat_id in processing_image and processing_image[chat_id]:
                     await application.bot.send_message(chat_id=chat_id, text="I'm already on it, give me a sec!")
                 else:
