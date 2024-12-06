@@ -25,6 +25,9 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import urlparse
+from huggingface_hub import InferenceClient
+from PIL import Image
+import io
 
 # Step 1: Configure logging - because if you're not logging, are you even coding?
 logging.basicConfig(
@@ -57,6 +60,7 @@ MONGO_URI = get_env_variable('MONGO_URI')
 BITTY_TOKEN_ADDRESS = get_env_variable('BITTY_TOKEN_ADDRESS')  # Token address for token gating
 SOLANA_RPC_URL = get_env_variable('SOLANA_RPC_URL', required=False) or "https://api.mainnet-beta.solana.com"  # Default Solana RPC endpoint
 INTERMEDIARY_URL = get_env_variable('INTERMEDIARY_URL')
+HUGGING_FACE_TOKEN = get_env_variable('HUGGING_FACE_TOKEN')
 
 # Step 4: Initialize MongoDB client and cache collection - let's cache some chill vibes
 client = MongoClient(MONGO_URI)
@@ -101,6 +105,9 @@ processing_image = {}
 user_command_count = {}
 image_generation_enabled = True  # Enable image generation for testing
 MAX_COMMANDS_PER_MINUTE = 5
+
+# Hugging Face Inference Client
+hf_client = InferenceClient("black-forest-labs/FLUX.1-schnell", token=HUGGING_FACE_TOKEN)
 
 # Step 6: FastAPI application with detailed lifecycle management - because we're fancy like that
 @asynccontextmanager
@@ -321,19 +328,25 @@ async def handle_webhook(request: Request):
                 else:
                     processing_image[chat_id] = True
                     try:
-                        logger.info(f"Attempting image generation with Grok Vision Beta for user {chat_id}")
+                        logger.info(f"Attempting image generation with Hugging Face for user {chat_id}")
                         prompt = generate_image_prompt()
                         await application.bot.send_message(chat_id=chat_id, text=f"Generating image with the prompt: {prompt}")
-                        response = await query_grok(prompt, model_id="grok-vision-beta")
-                        if "Image generated:" in response:
-                            image_url = response.split("Image generated:")[1].strip()
-                            logger.info(f"Image URL from Grok Vision: {image_url}")
-                            await application.bot.send_photo(chat_id=chat_id, photo=image_url, caption="Here's your robo-hippo in all its glory!")
-                        else:
-                            logger.warning(f"No image was generated. Response: {response}")
-                            await application.bot.send_message(chat_id=chat_id, text="Failed to generate image. Here's what Grok said: " + response)
+                        
+                        # Generate image using Hugging Face
+                        try:
+                            image = hf_client.text_to_image(prompt)
+                            # Convert the image to bytes for Telegram
+                            img_byte_arr = io.BytesIO()
+                            image.save(img_byte_arr, format='PNG')
+                            img_byte_arr = img_byte_arr.getvalue()
+                            
+                            # Send the image to Telegram
+                            await application.bot.send_photo(chat_id=chat_id, photo=img_byte_arr, caption="Here's your robo-hippo in all its glory!")
+                        except Exception as e:
+                            logger.error(f"Error during image generation with Hugging Face: {e}")
+                            await application.bot.send_message(chat_id=chat_id, text="Failed to generate image via Hugging Face. Here's what went wrong: " + str(e))
                     except Exception as e:
-                        logger.error(f"Error during image generation with Grok Vision: {e}")
+                        logger.error(f"General error during image generation process: {e}")
                         await application.bot.send_message(chat_id=chat_id, text="Something went wrong with image generation. Try again later?")
                     finally:
                         if chat_id in processing_image:
